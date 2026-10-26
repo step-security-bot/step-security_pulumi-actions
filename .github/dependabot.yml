@@ -1,0 +1,31 @@
+version: 2
+updates:
+  - package-ecosystem: nuget
+    directory: /.github/test-stacks/dotnet
+    schedule:
+      interval: daily
+
+  - package-ecosystem: gomod
+    directory: /.github/test-stacks/golang
+    schedule:
+      interval: daily
+
+  - package-ecosystem: npm
+    directory: /.github/test-stacks/nodejs
+    schedule:
+      interval: daily
+
+  - package-ecosystem: pip
+    directory: /.github/test-stacks/python
+    schedule:
+      interval: daily
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: daily
+
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: daily
