@@ -1,0 +1,244 @@
+import { jest } from '@jest/globals';
+import { makeConfig } from '../config';
+
+const defaultConfig: Record<string, string> = {
+  command: 'up',
+  'stack-name': 'dev',
+  'work-dir': './',
+  'cloud-url': 'file://~',
+  'github-token': 'n/a',
+  'pulumi-version': '^3',
+  'comment-on-pr': 'false',
+  'comment-on-summary': 'false',
+  'always-include-summary': 'false',
+  upsert: 'false',
+  remove: 'false',
+  refresh: 'false',
+  'edit-pr-comment': 'false',
+  'expect-no-changes': 'false',
+  diff: 'false',
+  'target-dependents': 'false',
+  'exclude-dependents': 'false',
+  'exclude-protected': 'false',
+  plan: '',
+  'suppress-outputs': 'false',
+  'suppress-progress': 'false',
+  'continue-on-error': 'false',
+  'log-verbosity': '',
+  'log-flow': 'false',
+  debug: 'false',
+};
+
+function setupMockedConfig(config: Record<string, string>) {
+  Object.entries(config).forEach(([key, value]) => {
+    process.env[`INPUT_${key.replace(/ /g, '_').toUpperCase()}`] = value;
+  });
+}
+
+describe('config.ts', () => {
+  beforeEach(() => {
+    jest.resetModules();
+  });
+  it('should validate a configuration', async () => {
+    setupMockedConfig(defaultConfig);
+    const c = makeConfig();
+
+    expect(c).toBeTruthy();
+    expect(c).toMatchInlineSnapshot(`
+     {
+       "alwaysIncludeSummary": false,
+       "cloudUrl": "file://~",
+       "command": "up",
+       "commentOnPr": false,
+       "commentOnPrNumber": undefined,
+       "commentOnSummary": false,
+       "configMap": undefined,
+       "editCommentOnPr": false,
+       "githubToken": "n/a",
+       "options": {
+         "color": undefined,
+         "continueOnError": false,
+         "debug": false,
+         "diff": false,
+         "exclude": [],
+         "excludeDependents": false,
+         "excludeProtected": false,
+         "expectNoChanges": false,
+         "logFlow": false,
+         "logToStdErr": false,
+         "logVerbosity": undefined,
+         "message": "",
+         "parallel": undefined,
+         "plan": "",
+         "policyPackConfigs": [],
+         "policyPacks": [],
+         "refresh": false,
+         "replace": [],
+         "runProgram": undefined,
+         "suppressOutputs": false,
+         "suppressProgress": false,
+         "target": [],
+         "targetDependents": false,
+         "userAgent": "step-security/pulumi-actions@v7",
+       },
+       "pulumiVersion": "^3",
+       "remove": false,
+       "secretsProvider": "",
+       "stackName": "dev",
+       "upsert": false,
+       "workDir": "./",
+     }
+    `);
+  });
+  it('should not set runProgram if run-program is not provided', async () => {
+    setupMockedConfig(defaultConfig);
+    delete process.env['INPUT_RUN-PROGRAM'];
+    const c = makeConfig();
+    expect(c.options.runProgram).toBeUndefined();
+  });
+  it.each([
+    ['true', true],
+    ['false', false],
+  ])('should set runProgram if run-program is %s', async (value, expected) => {
+    setupMockedConfig({ ...defaultConfig, 'run-program': value });
+    try {
+      const c = makeConfig();
+      expect(c.options.runProgram).toBe(expected);
+    } finally {
+      delete process.env['INPUT_RUN-PROGRAM'];
+    }
+  });
+  it('should fail if configuration are invalid', async () => {
+    setupMockedConfig({
+      ...defaultConfig,
+      'stack-name': '',
+      command: 'invalid',
+    });
+
+    expect(() => makeConfig()).toThrowErrorMatchingInlineSnapshot(
+      `"Input was not correct for command. Valid alternatives are: up, update, refresh, destroy, preview, output"`,
+    );
+  });
+
+  it('should return ^3 if pulumi-version is undefined', async () => {
+    jest.unstable_mockModule('@actions/core', () => ({
+      getInput: jest.fn((name: string) => {
+        switch (name) {
+          case 'pulumi-version':
+            return undefined;
+        }
+        return defaultConfig[name];
+      }),
+      getBooleanInput: jest.fn((name: string) => {
+        return defaultConfig[name];
+      }),
+      getMultilineInput: jest.fn((name: string) => {
+        return defaultConfig[name];
+      }),
+    }));
+    const { makeConfig } = await import('../config');
+    const conf = makeConfig();
+    expect(conf.pulumiVersion).toEqual('^3');
+  });
+
+  it('should read version from pulumi-version-file', async () => {
+    jest.unstable_mockModule('@actions/core', () => ({
+      getInput: jest.fn((name: string) => {
+        switch (name) {
+          case 'pulumi-version-file':
+            return '.pulumi.version';
+          case 'pulumi-version':
+            return undefined;
+        }
+        return defaultConfig[name];
+      }),
+      getBooleanInput: jest.fn((name: string) => {
+        return defaultConfig[name];
+      }),
+      getMultilineInput: jest.fn((name: string) => {
+        return defaultConfig[name];
+      }),
+    }));
+    jest.unstable_mockModule('fs', () => ({
+      ...jest.requireActual<typeof import('fs')>('fs'),
+      readFileSync: jest.fn((path: string) => {
+        expect(path).toEqual('.pulumi.version');
+        return '3.121.0';
+      }),
+      existsSync: jest.fn(() => {
+        return true;
+      }),
+    }));
+    const { makeConfig } = await import('../config');
+    const conf = makeConfig();
+    expect(conf.pulumiVersion).toEqual('3.121.0');
+  });
+
+  it('should fail if pulumi-version-file does not exist', async () => {
+    jest.unstable_mockModule('@actions/core', () => ({
+      getInput: jest.fn((name: string) => {
+        switch (name) {
+          case 'pulumi-version-file':
+            return '.pulumi.version';
+          case 'pulumi-version':
+            return undefined;
+        }
+        return defaultConfig[name];
+      }),
+    }));
+    jest.unstable_mockModule('fs', () => ({
+      ...jest.requireActual<typeof import('fs')>('fs'),
+      readFileSync: jest.fn((path: string) => {
+        expect(path).toEqual('.pulumi.version');
+        return '3.121.0';
+      }),
+      existsSync: jest.fn(() => {
+        return false;
+      }),
+    }));
+    const { makeConfig } = await import('../config');
+    expect(() => {
+      makeConfig();
+    }).toThrow(/pulumi-version-file '\.pulumi\.version' does not exist/);
+  });
+
+  it('should fail if pulumi-version-file and pulumi-version are both provided', async () => {
+    jest.unstable_mockModule('@actions/core', () => ({
+      getInput: jest.fn((name: string) => {
+        switch (name) {
+          case 'pulumi-version-file':
+            return '.pulumi.version';
+          case 'pulumi-version':
+            return '^3';
+        }
+        return defaultConfig[name];
+      }),
+    }));
+    jest.unstable_mockModule('fs', () => ({
+      ...jest.requireActual<typeof import('fs')>('fs'),
+      readFileSync: jest.fn((path: string) => {
+        expect(path).toEqual('.pulumi.version');
+        return '3.121.0';
+      }),
+      existsSync: jest.fn(() => {
+        return false;
+      }),
+    }));
+    const { makeConfig } = await import('../config');
+    expect(() => {
+      makeConfig();
+    }).toThrow(
+      /Only one of 'pulumi-version' or 'pulumi-version-file' should be provided, got both/,
+    );
+  });
+
+  it('should log to stderr when log verbosity is set', async () => {
+    setupMockedConfig({
+      ...defaultConfig,
+      'log-verbosity': '9',
+    });
+
+    const c = makeConfig();
+    expect(c.options.logToStdErr).toBe(true);
+  });
+});
