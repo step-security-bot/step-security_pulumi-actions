@@ -32,5 +32,4 @@ build/
 **/obj
 **/bin
 
-dist/
 .yarn/

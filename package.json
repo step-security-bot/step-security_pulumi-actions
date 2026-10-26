@@ -6,9 +6,7 @@
   "license": "Apache-2.0",
   "scripts": {
     "clean": "rimraf coverage build tmp dist",
-    "prebuild": "yarn run clean",
-    "build": "ncc build src/main.ts -e typescript -o dist --source-map",
-    "postbuild": "node scripts/replace-ts.js",
+    "build": "yarn run clean && ncc build src/main.ts -e typescript -o dist --source-map && node scripts/replace-ts.js",
     "lint": "eslint . --ext .ts,.tsx",
     "test": "NODE_OPTIONS=--experimental-vm-modules jest --coverage src/**/*",
     "test:watch": "jest --watch"
