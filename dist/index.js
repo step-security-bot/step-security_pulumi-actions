@@ -23058,7 +23058,7 @@ const promiseAllRejectLate = __nccwpck_require__(1832)
 const runScript = __nccwpck_require__(90226)
 const { callLimit: promiseCallLimit } = __nccwpck_require__(21391)
 const { depth: dfwalk } = __nccwpck_require__(31937)
-const { isNodeGypPackage, defaultGypInstallScript } = __nccwpck_require__(76799)
+const { isNodeGypPackage, defaultGypInstallScript } = __nccwpck_require__(12443)
 const { promiseRetry } = __nccwpck_require__(49498)
 const { log, time } = __nccwpck_require__(26687)
 const { resolve, delimiter } = __nccwpck_require__(76760)
@@ -34978,6 +34978,27 @@ module.exports = YarnLock
 
 /***/ }),
 
+/***/ 12443:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const util = __nccwpck_require__(39023)
+const fs = __nccwpck_require__(79896)
+const { stat } = fs.promises || { stat: util.promisify(fs.stat) }
+
+async function isNodeGypPackage (path) {
+  return await stat(`${path}/binding.gyp`)
+    .then(st => st.isFile())
+    .catch(() => false)
+}
+
+module.exports = {
+  isNodeGypPackage,
+  defaultGypInstallScript: 'node-gyp rebuild',
+}
+
+
+/***/ }),
+
 /***/ 84212:
 /***/ ((module) => {
 
@@ -36437,7 +36458,7 @@ exports.isWindows = isWindows
 /***/ 29867:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
-const which = __nccwpck_require__(11189)
+const which = __nccwpck_require__(52723)
 
 let gitPath
 try {
@@ -36455,6 +36476,124 @@ module.exports = (opts = {}) => {
   }
   return gitPath
 }
+
+
+/***/ }),
+
+/***/ 52723:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const { isexe, sync: isexeSync } = __nccwpck_require__(45289)
+const { join, delimiter, sep, posix } = __nccwpck_require__(16928)
+
+const isWindows = process.platform === 'win32'
+
+// used to check for slashed in commands passed in. always checks for the posix
+// seperator on all platforms, and checks for the current separator when not on
+// a posix platform. don't use the isWindows check for this since that is mocked
+// in tests but we still need the code to actually work when called. that is also
+// why it is ignored from coverage.
+/* istanbul ignore next */
+const rSlash = new RegExp(`[${posix.sep}${sep === posix.sep ? '' : sep}]`.replace(/(\\)/g, '\\$1'))
+const rRel = new RegExp(`^\\.${rSlash.source}`)
+
+const getNotFoundError = (cmd) =>
+  Object.assign(new Error(`not found: ${cmd}`), { code: 'ENOENT' })
+
+const getPathInfo = (cmd, {
+  path: optPath = process.env.PATH,
+  pathExt: optPathExt = process.env.PATHEXT,
+  delimiter: optDelimiter = delimiter,
+}) => {
+  // If it has a slash, then we don't bother searching the pathenv.
+  // just check the file itself, and that's it.
+  const pathEnv = cmd.match(rSlash) ? [''] : [
+    // windows always checks the cwd first
+    ...(isWindows ? [process.cwd()] : []),
+    ...(optPath || /* istanbul ignore next: very unusual */ '').split(optDelimiter),
+  ]
+
+  if (isWindows) {
+    const pathExtExe = optPathExt ||
+      ['.EXE', '.CMD', '.BAT', '.COM'].join(optDelimiter)
+    const pathExt = pathExtExe.split(optDelimiter).flatMap((item) => [item, item.toLowerCase()])
+    if (cmd.includes('.') && pathExt[0] !== '') {
+      pathExt.unshift('')
+    }
+    return { pathEnv, pathExt, pathExtExe }
+  }
+
+  return { pathEnv, pathExt: [''] }
+}
+
+const getPathPart = (raw, cmd) => {
+  const pathPart = /^".*"$/.test(raw) ? raw.slice(1, -1) : raw
+  const prefix = !pathPart && rRel.test(cmd) ? cmd.slice(0, 2) : ''
+  return prefix + join(pathPart, cmd)
+}
+
+const which = async (cmd, opt = {}) => {
+  const { pathEnv, pathExt, pathExtExe } = getPathInfo(cmd, opt)
+  const found = []
+
+  for (const envPart of pathEnv) {
+    const p = getPathPart(envPart, cmd)
+
+    for (const ext of pathExt) {
+      const withExt = p + ext
+      const is = await isexe(withExt, { pathExt: pathExtExe, ignoreErrors: true })
+      if (is) {
+        if (!opt.all) {
+          return withExt
+        }
+        found.push(withExt)
+      }
+    }
+  }
+
+  if (opt.all && found.length) {
+    return found
+  }
+
+  if (opt.nothrow) {
+    return null
+  }
+
+  throw getNotFoundError(cmd)
+}
+
+const whichSync = (cmd, opt = {}) => {
+  const { pathEnv, pathExt, pathExtExe } = getPathInfo(cmd, opt)
+  const found = []
+
+  for (const pathEnvPart of pathEnv) {
+    const p = getPathPart(pathEnvPart, cmd)
+
+    for (const ext of pathExt) {
+      const withExt = p + ext
+      const is = isexeSync(withExt, { pathExt: pathExtExe, ignoreErrors: true })
+      if (is) {
+        if (!opt.all) {
+          return withExt
+        }
+        found.push(withExt)
+      }
+    }
+  }
+
+  if (opt.all && found.length) {
+    return found
+  }
+
+  if (opt.nothrow) {
+    return null
+  }
+
+  throw getNotFoundError(cmd)
+}
+
+module.exports = which
+which.sync = whichSync
 
 
 /***/ }),
@@ -37834,7 +37973,7 @@ module.exports = PackageJson
 
 // This is an implementation of the validForNewPackage flag in validate-npm-package-license, which is no longer maintained
 
-const parse = __nccwpck_require__(46495)
+const parse = __nccwpck_require__(93326)
 
 function usesLicenseRef (ast) {
   if (Object.hasOwn(ast, 'license')) {
@@ -39050,307 +39189,6 @@ module.exports = updateWorkspaces
 
 /***/ }),
 
-/***/ 46495:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-var scan = __nccwpck_require__(40654)
-var parse = __nccwpck_require__(62600)
-
-module.exports = function (source) {
-  return parse(scan(source))
-}
-
-
-/***/ }),
-
-/***/ 62600:
-/***/ ((module) => {
-
-"use strict";
-
-
-// The ABNF grammar in the spec is totally ambiguous.
-//
-// This parser follows the operator precedence defined in the
-// `Order of Precedence and Parentheses` section.
-
-module.exports = function (tokens) {
-  var index = 0
-
-  function hasMore () {
-    return index < tokens.length
-  }
-
-  function token () {
-    return hasMore() ? tokens[index] : null
-  }
-
-  function next () {
-    if (!hasMore()) {
-      throw new Error()
-    }
-    index++
-  }
-
-  function parseOperator (operator) {
-    var t = token()
-    if (t && t.type === 'OPERATOR' && operator === t.string) {
-      next()
-      return t.string
-    }
-  }
-
-  function parseWith () {
-    if (parseOperator('WITH')) {
-      var t = token()
-      if (t && t.type === 'EXCEPTION') {
-        next()
-        return t.string
-      }
-      throw new Error('Expected exception after `WITH`')
-    }
-  }
-
-  function parseLicenseRef () {
-    // TODO: Actually, everything is concatenated into one string
-    // for backward-compatibility but it could be better to return
-    // a nice structure.
-    var begin = index
-    var string = ''
-    var t = token()
-    if (t.type === 'DOCUMENTREF') {
-      next()
-      string += 'DocumentRef-' + t.string + ':'
-      if (!parseOperator(':')) {
-        throw new Error('Expected `:` after `DocumentRef-...`')
-      }
-    }
-    t = token()
-    if (t.type === 'LICENSEREF') {
-      next()
-      string += 'LicenseRef-' + t.string
-      return { license: string }
-    }
-    index = begin
-  }
-
-  function parseLicense () {
-    var t = token()
-    if (t && t.type === 'LICENSE') {
-      next()
-      var node = { license: t.string }
-      if (parseOperator('+')) {
-        node.plus = true
-      }
-      var exception = parseWith()
-      if (exception) {
-        node.exception = exception
-      }
-      return node
-    }
-  }
-
-  function parseParenthesizedExpression () {
-    var left = parseOperator('(')
-    if (!left) {
-      return
-    }
-
-    var expr = parseExpression()
-
-    if (!parseOperator(')')) {
-      throw new Error('Expected `)`')
-    }
-
-    return expr
-  }
-
-  function parseAtom () {
-    return (
-      parseParenthesizedExpression() ||
-      parseLicenseRef() ||
-      parseLicense()
-    )
-  }
-
-  function makeBinaryOpParser (operator, nextParser) {
-    return function parseBinaryOp () {
-      var left = nextParser()
-      if (!left) {
-        return
-      }
-
-      if (!parseOperator(operator)) {
-        return left
-      }
-
-      var right = parseBinaryOp()
-      if (!right) {
-        throw new Error('Expected expression')
-      }
-      return {
-        left: left,
-        conjunction: operator.toLowerCase(),
-        right: right
-      }
-    }
-  }
-
-  var parseAnd = makeBinaryOpParser('AND', parseAtom)
-  var parseExpression = makeBinaryOpParser('OR', parseAnd)
-
-  var node = parseExpression()
-  if (!node || hasMore()) {
-    throw new Error('Syntax error')
-  }
-  return node
-}
-
-
-/***/ }),
-
-/***/ 40654:
-/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
-
-"use strict";
-
-
-var licenses = []
-  .concat(__nccwpck_require__(75204))
-  .concat(__nccwpck_require__(3389))
-var exceptions = __nccwpck_require__(53988)
-
-module.exports = function (source) {
-  var index = 0
-
-  function hasMore () {
-    return index < source.length
-  }
-
-  // `value` can be a regexp or a string.
-  // If it is recognized, the matching source string is returned and
-  // the index is incremented. Otherwise `undefined` is returned.
-  function read (value) {
-    if (value instanceof RegExp) {
-      var chars = source.slice(index)
-      var match = chars.match(value)
-      if (match) {
-        index += match[0].length
-        return match[0]
-      }
-    } else {
-      if (source.indexOf(value, index) === index) {
-        index += value.length
-        return value
-      }
-    }
-  }
-
-  function skipWhitespace () {
-    read(/[ ]*/)
-  }
-
-  function operator () {
-    var string
-    var possibilities = [/^WITH/i, /^AND/i, /^OR/i, '(', ')', ':', '+']
-    for (var i = 0; i < possibilities.length; i++) {
-      string = read(possibilities[i])
-      if (string) {
-        break
-      }
-    }
-
-    if (string === '+' && index > 1 && source[index - 2] === ' ') {
-      throw new Error('Space before `+`')
-    }
-
-    return string && {
-      type: 'OPERATOR',
-      string: string.toUpperCase()
-    }
-  }
-
-  function idstring () {
-    return read(/[A-Za-z0-9-.]+/)
-  }
-
-  function expectIdstring () {
-    var string = idstring()
-    if (!string) {
-      throw new Error('Expected idstring at offset ' + index)
-    }
-    return string
-  }
-
-  function documentRef () {
-    if (read('DocumentRef-')) {
-      var string = expectIdstring()
-      return { type: 'DOCUMENTREF', string: string }
-    }
-  }
-
-  function licenseRef () {
-    if (read('LicenseRef-')) {
-      var string = expectIdstring()
-      return { type: 'LICENSEREF', string: string }
-    }
-  }
-
-  function identifier () {
-    var begin = index
-    var string = idstring()
-
-    if (licenses.indexOf(string) !== -1) {
-      return {
-        type: 'LICENSE',
-        string: string
-      }
-    } else if (exceptions.indexOf(string) !== -1) {
-      return {
-        type: 'EXCEPTION',
-        string: string
-      }
-    }
-
-    index = begin
-  }
-
-  // Tries to read the next token. Returns `undefined` if no token is
-  // recognized.
-  function parseToken () {
-    // Ordering matters
-    return (
-      operator() ||
-      documentRef() ||
-      licenseRef() ||
-      identifier()
-    )
-  }
-
-  var tokens = []
-  while (hasMore()) {
-    skipWhitespace()
-    if (!hasMore()) {
-      break
-    }
-
-    var token = parseToken()
-    if (!token) {
-      throw new Error('Unexpected `' + source[index] +
-                      '` at offset ' + index)
-    }
-
-    tokens.push(token)
-  }
-  return tokens
-}
-
-
-/***/ }),
-
 /***/ 91734:
 /***/ ((module) => {
 
@@ -39434,7 +39272,7 @@ module.exports = {
 
 const { spawn } = __nccwpck_require__(35317)
 const os = __nccwpck_require__(70857)
-const which = __nccwpck_require__(11189)
+const which = __nccwpck_require__(91750)
 
 const escape = __nccwpck_require__(91734)
 
@@ -39648,6 +39486,124 @@ const findInObject = (obj, key) => {
 }
 
 module.exports = promiseSpawn
+
+
+/***/ }),
+
+/***/ 91750:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const { isexe, sync: isexeSync } = __nccwpck_require__(45289)
+const { join, delimiter, sep, posix } = __nccwpck_require__(16928)
+
+const isWindows = process.platform === 'win32'
+
+// used to check for slashed in commands passed in. always checks for the posix
+// seperator on all platforms, and checks for the current separator when not on
+// a posix platform. don't use the isWindows check for this since that is mocked
+// in tests but we still need the code to actually work when called. that is also
+// why it is ignored from coverage.
+/* istanbul ignore next */
+const rSlash = new RegExp(`[${posix.sep}${sep === posix.sep ? '' : sep}]`.replace(/(\\)/g, '\\$1'))
+const rRel = new RegExp(`^\\.${rSlash.source}`)
+
+const getNotFoundError = (cmd) =>
+  Object.assign(new Error(`not found: ${cmd}`), { code: 'ENOENT' })
+
+const getPathInfo = (cmd, {
+  path: optPath = process.env.PATH,
+  pathExt: optPathExt = process.env.PATHEXT,
+  delimiter: optDelimiter = delimiter,
+}) => {
+  // If it has a slash, then we don't bother searching the pathenv.
+  // just check the file itself, and that's it.
+  const pathEnv = cmd.match(rSlash) ? [''] : [
+    // windows always checks the cwd first
+    ...(isWindows ? [process.cwd()] : []),
+    ...(optPath || /* istanbul ignore next: very unusual */ '').split(optDelimiter),
+  ]
+
+  if (isWindows) {
+    const pathExtExe = optPathExt ||
+      ['.EXE', '.CMD', '.BAT', '.COM'].join(optDelimiter)
+    const pathExt = pathExtExe.split(optDelimiter).flatMap((item) => [item, item.toLowerCase()])
+    if (cmd.includes('.') && pathExt[0] !== '') {
+      pathExt.unshift('')
+    }
+    return { pathEnv, pathExt, pathExtExe }
+  }
+
+  return { pathEnv, pathExt: [''] }
+}
+
+const getPathPart = (raw, cmd) => {
+  const pathPart = /^".*"$/.test(raw) ? raw.slice(1, -1) : raw
+  const prefix = !pathPart && rRel.test(cmd) ? cmd.slice(0, 2) : ''
+  return prefix + join(pathPart, cmd)
+}
+
+const which = async (cmd, opt = {}) => {
+  const { pathEnv, pathExt, pathExtExe } = getPathInfo(cmd, opt)
+  const found = []
+
+  for (const envPart of pathEnv) {
+    const p = getPathPart(envPart, cmd)
+
+    for (const ext of pathExt) {
+      const withExt = p + ext
+      const is = await isexe(withExt, { pathExt: pathExtExe, ignoreErrors: true })
+      if (is) {
+        if (!opt.all) {
+          return withExt
+        }
+        found.push(withExt)
+      }
+    }
+  }
+
+  if (opt.all && found.length) {
+    return found
+  }
+
+  if (opt.nothrow) {
+    return null
+  }
+
+  throw getNotFoundError(cmd)
+}
+
+const whichSync = (cmd, opt = {}) => {
+  const { pathEnv, pathExt, pathExtExe } = getPathInfo(cmd, opt)
+  const found = []
+
+  for (const pathEnvPart of pathEnv) {
+    const p = getPathPart(pathEnvPart, cmd)
+
+    for (const ext of pathExt) {
+      const withExt = p + ext
+      const is = isexeSync(withExt, { pathExt: pathExtExe, ignoreErrors: true })
+      if (is) {
+        if (!opt.all) {
+          return withExt
+        }
+        found.push(withExt)
+      }
+    }
+  }
+
+  if (opt.all && found.length) {
+    return found
+  }
+
+  if (opt.nothrow) {
+    return null
+  }
+
+  throw getNotFoundError(cmd)
+}
+
+module.exports = which
+which.sync = whichSync
 
 
 /***/ }),
@@ -40270,28 +40226,62 @@ module.exports = {
 
 /***/ }),
 
-/***/ 32724:
+/***/ 31099:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
-const { stat } = __nccwpck_require__(51455)
-const { resolve } = __nccwpck_require__(76760)
+const setPATH = __nccwpck_require__(74449)
+const { resolve } = __nccwpck_require__(16928)
 
-module.exports = async path => {
-  try {
-    const st = await stat(resolve(path, 'server.js'))
-    return st.isFile()
-  } catch (er) {
-    return false
+let npmConfigNodeGyp
+
+const makeSpawnArgs = options => {
+  const {
+    args,
+    binPaths,
+    cmd,
+    env,
+    event,
+    nodeGyp,
+    path,
+    scriptShell = true,
+    stdio,
+    stdioString,
+  } = options
+
+  if (nodeGyp) {
+    // npm already pulled this from env and passes it in to options
+    npmConfigNodeGyp = nodeGyp
+  } else if (env.npm_config_node_gyp) {
+    // legacy mode for standalone user
+    npmConfigNodeGyp = env.npm_config_node_gyp
+  } else {
+    // default
+    npmConfigNodeGyp = __nccwpck_require__.ab + "node-gyp.js"
   }
+
+  const spawnEnv = setPATH(path, binPaths, {
+    // we need to at least save the PATH environment var
+    ...process.env,
+    ...env,
+    npm_package_json: resolve(path, 'package.json'),
+    npm_lifecycle_event: event,
+    npm_lifecycle_script: cmd,
+    npm_config_node_gyp: __nccwpck_require__.ab + "node-gyp.js",
+  })
+
+  const spawnOpts = {
+    env: spawnEnv,
+    stdioString,
+    stdio,
+    cwd: path,
+    shell: scriptShell,
+  }
+
+  return [cmd, args, spawnOpts]
 }
 
+module.exports = makeSpawnArgs
 
-/***/ }),
-
-/***/ 31099:
-/***/ (() => {
-
-throw new Error("Module parse failed: Unexpected token (39:23)\nFile was processed with these loaders:\n * ./node_modules/@vercel/ncc/dist/ncc/loaders/empty-loader.js\n * ./node_modules/@vercel/ncc/dist/ncc/loaders/relocate-loader.js\n * ./node_modules/@vercel/ncc/dist/ncc/loaders/shebang-loader.js\nYou may need an additional loader to handle the result of these loaders.\n|     npm_lifecycle_event: event,\n|     npm_lifecycle_script: cmd,\n>     __nccwpck_require__.ab + \"node-gyp.js\",\n|   })\n| ");
 
 /***/ }),
 
@@ -40335,11 +40325,10 @@ module.exports = pkg => {
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
 const makeSpawnArgs = __nccwpck_require__(31099)
-const promiseSpawn = __nccwpck_require__(11377)
+const promiseSpawn = __nccwpck_require__(42558)
 const packageEnvs = __nccwpck_require__(29278)
 const { isNodeGypPackage, defaultGypInstallScript } = __nccwpck_require__(76799)
 const signalManager = __nccwpck_require__(57923)
-const isServerPackage = __nccwpck_require__(32724)
 
 const runScriptPkg = async options => {
   const {
@@ -40373,8 +40362,6 @@ const runScriptPkg = async options => {
     await isNodeGypPackage(path)
   ) {
     cmd = defaultGypInstallScript
-  } else if (event === 'start' && await isServerPackage(path)) {
-    cmd = 'node server.js'
   }
 
   if (!cmd) {
@@ -40383,19 +40370,13 @@ const runScriptPkg = async options => {
 
   let inputEnd = () => {}
   if (stdio === 'inherit') {
-    let banner
+    const { log, input } = __nccwpck_require__(89818)
     if (pkg._id) {
-      banner = `\n> ${pkg._id} ${event}\n`
+      log.notice('run', `${pkg._id} ${event}`)
     } else {
-      banner = `\n> ${event}\n`
+      log.notice('run', event)
     }
-    banner += `> ${cmd.trim().replace(/\n/g, '\n> ')}`
-    if (args.length) {
-      banner += ` ${args.join(' ')}`
-    }
-    banner += '\n'
-    const { output, input } = __nccwpck_require__(26687)
-    output.standard(banner)
+    log.notice('run', `${cmd.trim()} ${args?.join(' ')}`.trim())
     inputEnd = input.start()
   }
 
@@ -40455,10 +40436,9 @@ module.exports = runScriptPkg
 /***/ 90226:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
-const PackageJson = __nccwpck_require__(80319)
+const PackageJson = __nccwpck_require__(72058)
 const runScriptPkg = __nccwpck_require__(47545)
 const validateOptions = __nccwpck_require__(44092)
-const isServerPackage = __nccwpck_require__(32724)
 
 const runScript = async options => {
   validateOptions(options)
@@ -40469,7 +40449,67 @@ const runScript = async options => {
   return runScriptPkg({ ...options, pkg })
 }
 
-module.exports = Object.assign(runScript, { isServerPackage })
+module.exports = runScript
+
+
+/***/ }),
+
+/***/ 74449:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const { log } = __nccwpck_require__(89818)
+const { resolve, dirname, delimiter } = __nccwpck_require__(16928)
+// the path here is relative, even though it does not need to be
+// in order to make the posix tests pass in windows
+const nodeGypPath = __nccwpck_require__.ab + "node-gyp-bin"
+
+// Windows typically calls its PATH environ 'Path', but this is not
+// guaranteed, nor is it guaranteed to be the only one.  Merge them
+// all together in the order they appear in the object.
+const setPATH = (projectPath, binPaths, env) => {
+  const PATH = Object.keys(env).filter(p => /^path$/i.test(p) && env[p])
+    .map(p => env[p].split(delimiter))
+    .reduce((set, p) => set.concat(p.filter(concatted => !set.includes(concatted))), [])
+    .join(delimiter)
+
+  const pathArr = []
+  if (binPaths) {
+    for (const bin of binPaths) {
+      if (bin.includes(delimiter)) {
+        const event = env.npm_lifecycle_event
+        const context = event ? `"${event}" script` : 'script execution'
+        log.warn('run-script', `Path contains delimiter ("${delimiter}"), ${context} may not behave as expected.`)
+      }
+    }
+    pathArr.push(...binPaths)
+  }
+  // unshift the ./node_modules/.bin from every folder
+  // walk up until dirname() does nothing, at the root
+  // XXX we should specify a cwd that we don't go above
+  let p = projectPath
+  let pp
+  do {
+    pathArr.push(resolve(p, 'node_modules', '.bin'))
+    pp = p
+    p = dirname(p)
+  } while (p !== pp)
+  pathArr.push(__nccwpck_require__.ab + "node-gyp-bin", PATH)
+
+  const pathVal = pathArr.join(delimiter)
+
+  // XXX include the node-gyp-bin path somehow?  Probably better for
+  // npm or arborist or whoever to just provide that by putting it in
+  // the PATH environ, since that's preserved anyway.
+  for (const key of Object.keys(env)) {
+    if (/^path$/i.test(key)) {
+      env[key] = pathVal
+    }
+  }
+
+  return env
+}
+
+module.exports = setPATH
 
 
 /***/ }),
@@ -40573,6 +40613,5038 @@ const validateOptions = options => {
 }
 
 module.exports = validateOptions
+
+
+/***/ }),
+
+/***/ 16:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+// The goal here is to minimize both git workload and
+// the number of refs we download over the network.
+//
+// Every method ends up with the checked out working dir
+// at the specified ref, and resolves with the git sha.
+
+// Only certain whitelisted hosts get shallow cloning.
+// Many hosts (including GHE) don't always support it.
+// A failed shallow fetch takes a LOT longer than a full
+// fetch in most cases, so we skip it entirely.
+// Set opts.gitShallow = true/false to force this behavior
+// one way or the other.
+const shallowHosts = new Set([
+  'github.com',
+  'gist.github.com',
+  'gitlab.com',
+  'bitbucket.com',
+  'bitbucket.org',
+])
+// we have to use url.parse until we add the same shim that hosted-git-info has
+// to handle scp:// urls
+const { parse } = __nccwpck_require__(87016) // eslint-disable-line node/no-deprecated-api
+const path = __nccwpck_require__(16928)
+
+const getRevs = __nccwpck_require__(13779)
+const spawn = __nccwpck_require__(70286)
+const { isWindows } = __nccwpck_require__(97624)
+
+const pickManifest = __nccwpck_require__(41782)
+const fs = __nccwpck_require__(91943)
+
+module.exports = (repo, ref = 'HEAD', target = null, opts = {}) =>
+  getRevs(repo, opts).then(revs => clone(
+    repo,
+    revs,
+    ref,
+    resolveRef(revs, ref, opts),
+    target || defaultTarget(repo, opts.cwd),
+    opts
+  ))
+
+const maybeShallow = (repo, opts) => {
+  if (opts.gitShallow === false || opts.gitShallow) {
+    return opts.gitShallow
+  }
+  return shallowHosts.has(parse(repo).host)
+}
+
+const defaultTarget = (repo, /* istanbul ignore next */ cwd = process.cwd()) =>
+  path.resolve(cwd, path.basename(repo.replace(/[/\\]?\.git$/, '')))
+
+const clone = (repo, revs, ref, revDoc, target, opts) => {
+  if (!revDoc) {
+    return unresolved(repo, ref, target, opts)
+  }
+  if (revDoc.sha === revs.refs.HEAD.sha) {
+    return plain(repo, revDoc, target, opts)
+  }
+  if (revDoc.type === 'tag' || revDoc.type === 'branch') {
+    return branch(repo, revDoc, target, opts)
+  }
+  return other(repo, revDoc, target, opts)
+}
+
+const resolveRef = (revs, ref, opts) => {
+  const { spec = {} } = opts
+  ref = spec.gitCommittish || ref
+  /* istanbul ignore next - will fail anyway, can't pull */
+  if (!revs) {
+    return null
+  }
+  if (spec.gitRange) {
+    return pickManifest(revs, spec.gitRange, opts)
+  }
+  if (!ref) {
+    return revs.refs.HEAD
+  }
+  if (revs.refs[ref]) {
+    return revs.refs[ref]
+  }
+  if (revs.shas[ref]) {
+    return revs.refs[revs.shas[ref][0]]
+  }
+  return null
+}
+
+// pull request or some other kind of advertised ref
+const other = (repo, revDoc, target, opts) => {
+  const shallow = maybeShallow(repo, opts)
+
+  const fetchOrigin = ['fetch', 'origin', revDoc.rawRef]
+    .concat(shallow ? ['--depth=1'] : [])
+
+  const git = (args) => spawn(args, { ...opts, cwd: target })
+  return fs.mkdir(target, { recursive: true })
+    .then(() => git(['init']))
+    .then(() => isWindows(opts)
+      ? git(['config', '--local', '--add', 'core.longpaths', 'true'])
+      : null)
+    .then(() => git(['remote', 'add', 'origin', repo]))
+    .then(() => git(fetchOrigin))
+    .then(() => git(['checkout', revDoc.sha]))
+    .then(() => updateSubmodules(target, opts))
+    .then(() => revDoc.sha)
+}
+
+// tag or branches.  use -b
+const branch = (repo, revDoc, target, opts) => {
+  const args = [
+    'clone',
+    '-b',
+    revDoc.ref,
+    repo,
+    target,
+    '--recurse-submodules',
+  ]
+  if (maybeShallow(repo, opts)) {
+    args.push('--depth=1')
+  }
+  if (isWindows(opts)) {
+    args.push('--config', 'core.longpaths=true')
+  }
+  return spawn(args, opts).then(() => revDoc.sha)
+}
+
+// just the head.  clone it
+const plain = (repo, revDoc, target, opts) => {
+  const args = [
+    'clone',
+    repo,
+    target,
+    '--recurse-submodules',
+  ]
+  if (maybeShallow(repo, opts)) {
+    args.push('--depth=1')
+  }
+  if (isWindows(opts)) {
+    args.push('--config', 'core.longpaths=true')
+  }
+  return spawn(args, opts).then(() => revDoc.sha)
+}
+
+const updateSubmodules = async (target, opts) => {
+  const hasSubmodules = await fs.stat(`${target}/.gitmodules`)
+    .then(() => true)
+    .catch(() => false)
+  if (!hasSubmodules) {
+    return null
+  }
+  return spawn([
+    'submodule',
+    'update',
+    '-q',
+    '--init',
+    '--recursive',
+  ], { ...opts, cwd: target })
+}
+
+const unresolved = (repo, ref, target, opts) => {
+  // can't do this one shallowly, because the ref isn't advertised
+  // but we can avoid checking out the working dir twice, at least
+  const lp = isWindows(opts) ? ['--config', 'core.longpaths=true'] : []
+  const cloneArgs = ['clone', '--mirror', '-q', repo, target + '/.git']
+  const git = (args) => spawn(args, { ...opts, cwd: target })
+  return fs.mkdir(target, { recursive: true })
+    .then(() => git(cloneArgs.concat(lp)))
+    .then(() => git(['init']))
+    .then(() => git(['checkout', ref]))
+    .then(() => updateSubmodules(target, opts))
+    .then(() => git(['rev-parse', '--revs-only', 'HEAD']))
+    .then(({ stdout }) => stdout.trim())
+}
+
+
+/***/ }),
+
+/***/ 32546:
+/***/ ((module) => {
+
+
+const maxRetry = 3
+
+class GitError extends Error {
+  shouldRetry () {
+    return false
+  }
+}
+
+class GitConnectionError extends GitError {
+  constructor () {
+    super('A git connection error occurred')
+  }
+
+  shouldRetry (number) {
+    return number < maxRetry
+  }
+}
+
+class GitPathspecError extends GitError {
+  constructor () {
+    super('The git reference could not be found')
+  }
+}
+
+class GitUnknownError extends GitError {
+  constructor () {
+    super('An unknown git error occurred')
+  }
+}
+
+module.exports = {
+  GitConnectionError,
+  GitPathspecError,
+  GitUnknownError,
+}
+
+
+/***/ }),
+
+/***/ 43922:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const is = __nccwpck_require__(54205)
+const { dirname } = __nccwpck_require__(16928)
+
+module.exports = async ({ cwd = process.cwd(), root } = {}) => {
+  while (true) {
+    if (await is({ cwd })) {
+      return cwd
+    }
+    const next = dirname(cwd)
+    if (cwd === root || cwd === next) {
+      return null
+    }
+    cwd = next
+  }
+}
+
+
+/***/ }),
+
+/***/ 61133:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+module.exports = {
+  clone: __nccwpck_require__(16),
+  revs: __nccwpck_require__(13779),
+  spawn: __nccwpck_require__(70286),
+  is: __nccwpck_require__(54205),
+  find: __nccwpck_require__(43922),
+  isClean: __nccwpck_require__(88393),
+  errors: __nccwpck_require__(32546),
+}
+
+
+/***/ }),
+
+/***/ 88393:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const spawn = __nccwpck_require__(70286)
+
+module.exports = (opts = {}) =>
+  spawn(['status', '--porcelain=v1', '-uno'], opts)
+    .then(res => !res.stdout.trim().split(/\r?\n+/)
+      .map(l => l.trim()).filter(l => l).length)
+
+
+/***/ }),
+
+/***/ 54205:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+// not an airtight indicator, but a good gut-check to even bother trying
+const { stat } = __nccwpck_require__(91943)
+module.exports = ({ cwd = process.cwd() } = {}) =>
+  stat(cwd + '/.git').then(() => true, () => false)
+
+
+/***/ }),
+
+/***/ 55217:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+// turn an array of lines from `git ls-remote` into a thing
+// vaguely resembling a packument, where docs are a resolved ref
+
+const semver = __nccwpck_require__(62088)
+
+module.exports = lines => finish(lines.reduce(linesToRevsReducer, {
+  versions: {},
+  'dist-tags': {},
+  refs: {},
+  shas: {},
+}))
+
+const finish = revs => distTags(shaList(peelTags(revs)))
+
+// We can check out shallow clones on specific SHAs if we have a ref
+const shaList = revs => {
+  Object.keys(revs.refs).forEach(ref => {
+    const doc = revs.refs[ref]
+    if (!revs.shas[doc.sha]) {
+      revs.shas[doc.sha] = [ref]
+    } else {
+      revs.shas[doc.sha].push(ref)
+    }
+  })
+  return revs
+}
+
+// Replace any tags with their ^{} counterparts, if those exist
+const peelTags = revs => {
+  Object.keys(revs.refs).filter(ref => ref.endsWith('^{}')).forEach(ref => {
+    const peeled = revs.refs[ref]
+    const unpeeled = revs.refs[ref.replace(/\^\{\}$/, '')]
+    if (unpeeled) {
+      unpeeled.sha = peeled.sha
+      delete revs.refs[ref]
+    }
+  })
+  return revs
+}
+
+const distTags = revs => {
+  // not entirely sure what situations would result in an
+  // ichabod repo, but best to be careful in Sleepy Hollow anyway
+  const HEAD = revs.refs.HEAD || /* istanbul ignore next */ {}
+  const versions = Object.keys(revs.versions)
+  versions.forEach(v => {
+    // simulate a dist-tags with latest pointing at the
+    // 'latest' branch if one exists and is a version,
+    // or HEAD if not.
+    const ver = revs.versions[v]
+    if (revs.refs.latest && ver.sha === revs.refs.latest.sha) {
+      revs['dist-tags'].latest = v
+    } else if (ver.sha === HEAD.sha) {
+      revs['dist-tags'].HEAD = v
+      if (!revs.refs.latest) {
+        revs['dist-tags'].latest = v
+      }
+    }
+  })
+  return revs
+}
+
+const refType = ref => {
+  if (ref.startsWith('refs/tags/')) {
+    return 'tag'
+  }
+  if (ref.startsWith('refs/heads/')) {
+    return 'branch'
+  }
+  if (ref.startsWith('refs/pull/')) {
+    return 'pull'
+  }
+  if (ref === 'HEAD') {
+    return 'head'
+  }
+  // Could be anything, ignore for now
+  /* istanbul ignore next */
+  return 'other'
+}
+
+// return the doc, or null if we should ignore it.
+const lineToRevDoc = line => {
+  const split = line.trim().split(/\s+/, 2)
+  if (split.length < 2) {
+    return null
+  }
+
+  const sha = split[0].trim()
+  const rawRef = split[1].trim()
+  const type = refType(rawRef)
+
+  if (type === 'tag') {
+    // refs/tags/foo^{} is the 'peeled tag', ie the commit
+    // that is tagged by refs/tags/foo they resolve to the same
+    // content, just different objects in git's data structure.
+    // But, we care about the thing the tag POINTS to, not the tag
+    // object itself, so we only look at the peeled tag refs, and
+    // ignore the pointer.
+    // For now, though, we have to save both, because some tags
+    // don't have peels, if they were not annotated.
+    const ref = rawRef.slice('refs/tags/'.length)
+    return { sha, ref, rawRef, type }
+  }
+
+  if (type === 'branch') {
+    const ref = rawRef.slice('refs/heads/'.length)
+    return { sha, ref, rawRef, type }
+  }
+
+  if (type === 'pull') {
+    // NB: merged pull requests installable with #pull/123/merge
+    // for the merged pr, or #pull/123 for the PR head
+    const ref = rawRef.slice('refs/'.length).replace(/\/head$/, '')
+    return { sha, ref, rawRef, type }
+  }
+
+  if (type === 'head') {
+    const ref = 'HEAD'
+    return { sha, ref, rawRef, type }
+  }
+
+  // at this point, all we can do is leave the ref un-munged
+  return { sha, ref: rawRef, rawRef, type }
+}
+
+const linesToRevsReducer = (revs, line) => {
+  const doc = lineToRevDoc(line)
+
+  if (!doc) {
+    return revs
+  }
+
+  revs.refs[doc.ref] = doc
+  revs.refs[doc.rawRef] = doc
+
+  if (doc.type === 'tag') {
+    // try to pull a semver value out of tags like `release-v1.2.3`
+    // which is a pretty common pattern.
+    const match = !doc.ref.endsWith('^{}') &&
+      doc.ref.match(/v?(\d+\.\d+\.\d+(?:[-+].+)?)$/)
+    if (match && semver.valid(match[1], true)) {
+      revs.versions[semver.clean(match[1], true)] = doc
+    }
+  }
+
+  return revs
+}
+
+
+/***/ }),
+
+/***/ 11976:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const {
+  GitConnectionError,
+  GitPathspecError,
+  GitUnknownError,
+} = __nccwpck_require__(32546)
+
+const connectionErrorRe = new RegExp([
+  'remote error: Internal Server Error',
+  'The remote end hung up unexpectedly',
+  'Connection timed out',
+  'Operation timed out',
+  'Failed to connect to .* Timed out',
+  'Connection reset by peer',
+  'SSL_ERROR_SYSCALL',
+  'The requested URL returned error: 503',
+].join('|'))
+
+const missingPathspecRe = /pathspec .* did not match any file\(s\) known to git/
+
+function makeError (er) {
+  const message = er.stderr
+  let gitEr
+  if (connectionErrorRe.test(message)) {
+    gitEr = new GitConnectionError(message)
+  } else if (missingPathspecRe.test(message)) {
+    gitEr = new GitPathspecError(message)
+  } else {
+    gitEr = new GitUnknownError(message)
+  }
+  return Object.assign(gitEr, er)
+}
+
+module.exports = makeError
+
+
+/***/ }),
+
+/***/ 18603:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const fs = __nccwpck_require__(73024)
+const os = __nccwpck_require__(48161)
+const path = __nccwpck_require__(76760)
+const ini = __nccwpck_require__(48171)
+
+const gitConfigPath = path.join(os.homedir(), '.gitconfig')
+
+let cachedConfig = null
+
+// Function to load and cache the git config
+const loadGitConfig = () => {
+  if (cachedConfig === null) {
+    try {
+      cachedConfig = {}
+      if (fs.existsSync(gitConfigPath)) {
+        const configContent = fs.readFileSync(gitConfigPath, 'utf-8')
+        cachedConfig = ini.parse(configContent)
+      }
+    } catch (error) {
+      cachedConfig = {}
+    }
+  }
+  return cachedConfig
+}
+
+const checkGitConfigs = () => {
+  const config = loadGitConfig()
+  return {
+    sshCommandSetInConfig: config?.core?.sshCommand !== undefined,
+    askPassSetInConfig: config?.core?.askpass !== undefined,
+  }
+}
+
+const sshCommandSetInEnv = process.env.GIT_SSH_COMMAND !== undefined
+const askPassSetInEnv = process.env.GIT_ASKPASS !== undefined
+const { sshCommandSetInConfig, askPassSetInConfig } = checkGitConfigs()
+
+// Values we want to set if they're not already defined by the end user
+// This defaults to accepting new ssh host key fingerprints
+const finalGitEnv = {
+  ...(askPassSetInEnv || askPassSetInConfig ? {} : {
+    GIT_ASKPASS: 'echo',
+  }),
+  ...(sshCommandSetInEnv || sshCommandSetInConfig ? {} : {
+    GIT_SSH_COMMAND: 'ssh -oStrictHostKeyChecking=accept-new',
+  }),
+}
+
+module.exports = (opts = {}) => ({
+  stdioString: true,
+  ...opts,
+  shell: false,
+  env: opts.env || { ...finalGitEnv, ...process.env },
+})
+
+// Export the loadGitConfig function for testing
+module.exports.loadGitConfig = loadGitConfig
+
+
+/***/ }),
+
+/***/ 13779:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const spawn = __nccwpck_require__(70286)
+const { LRUCache } = __nccwpck_require__(8416)
+const linesToRevs = __nccwpck_require__(55217)
+
+const revsCache = new LRUCache({
+  max: 100,
+  ttl: 5 * 60 * 1000,
+})
+
+module.exports = async (repo, opts = {}) => {
+  if (!opts.noGitRevCache) {
+    const cached = revsCache.get(repo)
+    if (cached) {
+      return cached
+    }
+  }
+
+  const { stdout } = await spawn(['ls-remote', repo], opts)
+  const revs = linesToRevs(stdout.trim().split('\n'))
+  revsCache.set(repo, revs)
+  return revs
+}
+
+
+/***/ }),
+
+/***/ 70286:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const spawn = __nccwpck_require__(42558)
+const { promiseRetry } = __nccwpck_require__(49498)
+const { log } = __nccwpck_require__(89818)
+const makeError = __nccwpck_require__(11976)
+const makeOpts = __nccwpck_require__(18603)
+
+module.exports = (gitArgs, opts = {}) => {
+  const whichGit = __nccwpck_require__(42400)
+  const gitPath = whichGit(opts)
+
+  if (gitPath instanceof Error) {
+    return Promise.reject(gitPath)
+  }
+
+  // undocumented option, mostly only here for tests
+  const args = opts.allowReplace || gitArgs[0] === '--no-replace-objects'
+    ? gitArgs
+    : ['--no-replace-objects', ...gitArgs]
+
+  let retryOpts = opts.retry
+  if (retryOpts === null || retryOpts === undefined) {
+    retryOpts = {
+      retries: opts.fetchRetries || 2,
+      factor: opts.fetchRetryFactor || 10,
+      maxTimeout: opts.fetchRetryMaxtimeout || 60000,
+      minTimeout: opts.fetchRetryMintimeout || 1000,
+    }
+  }
+  return promiseRetry((retryFn, number) => {
+    if (number !== 1) {
+      log.silly('git', `Retrying git command: ${
+        args.join(' ')} attempt # ${number}`)
+    }
+
+    return spawn(gitPath, args, makeOpts(opts))
+      .catch(er => {
+        const gitError = makeError(er)
+        if (!gitError.shouldRetry(number)) {
+          throw gitError
+        }
+        retryFn(gitError)
+      })
+  }, retryOpts)
+}
+
+
+/***/ }),
+
+/***/ 97624:
+/***/ ((__unused_webpack_module, exports) => {
+
+const isWindows = opts => (opts.fakePlatform || process.platform) === 'win32'
+
+exports.isWindows = isWindows
+
+
+/***/ }),
+
+/***/ 42400:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const which = __nccwpck_require__(11189)
+
+let gitPath
+try {
+  gitPath = which.sync('git')
+} catch {
+  // ignore errors
+}
+
+module.exports = (opts = {}) => {
+  if (opts.git) {
+    return opts.git
+  }
+  if (!gitPath || opts.git === false) {
+    return Object.assign(new Error('No git binary found in $PATH'), { code: 'ENOGIT' })
+  }
+  return gitPath
+}
+
+
+/***/ }),
+
+/***/ 72058:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const { readFile, writeFile } = __nccwpck_require__(51455)
+const { resolve } = __nccwpck_require__(76760)
+const parseJSON = __nccwpck_require__(77223)
+
+const updateDeps = __nccwpck_require__(38543)
+const updateScripts = __nccwpck_require__(87504)
+const updateWorkspaces = __nccwpck_require__(80420)
+const { normalize, syncNormalize } = __nccwpck_require__(8145)
+const { read, parse } = __nccwpck_require__(6841)
+const { packageSort } = __nccwpck_require__(4664)
+
+// a list of handy specialized helper functions that take
+// care of special cases that are handled by the npm cli
+const knownSteps = new Set([
+  updateDeps,
+  updateScripts,
+  updateWorkspaces,
+])
+
+// list of all keys that are handled by "knownSteps" helpers
+const knownKeys = new Set([
+  ...updateDeps.knownKeys,
+  'scripts',
+  'workspaces',
+])
+
+class PackageJson {
+  // npm pkg fix
+  static fixSteps = Object.freeze([
+    'binRefs',
+    'bundleDependencies',
+    'fixName',
+    'fixVersionField',
+    'fixRepositoryField',
+    'fixDependencies',
+    'devDependencies',
+    'scriptpath',
+  ])
+
+  static normalizeSteps = Object.freeze([
+    '_id',
+    '_attributes',
+    'bundledDependencies',
+    'bundleDependencies',
+    'overrides',
+    'optionalDedupe',
+    'scripts',
+    'funding',
+    'bin',
+    'binDir',
+  ])
+
+  static prepareSteps = Object.freeze([
+    '_id',
+    '_attributes',
+    'bundledDependencies',
+    'bundleDependencies',
+    'bundleDependenciesDeleteFalse',
+    'overrides',
+    'gypfile',
+    'scriptpath',
+    'authors',
+    'readme',
+    'mans',
+    'binDir',
+    'gitHead',
+    'fillTypes',
+    'normalizeData',
+    'binRefs',
+  ])
+
+  // create a new empty package.json, so we can save at the given path even
+  // though we didn't start from a parsed file
+  static async create (path, opts = {}) {
+    const p = new PackageJson()
+    await p.create(path)
+    if (opts.data) {
+      return p.update(opts.data)
+    }
+    return p
+  }
+
+  // Loads a package.json at given path and JSON parses
+  static async load (path, opts = {}) {
+    const p = new PackageJson()
+    // Avoid try/catch if we aren't going to create
+    if (!opts.create) {
+      return p.load(path)
+    }
+
+    try {
+      return await p.load(path)
+    } catch (err) {
+      if (!err.message.startsWith('Could not read package.json')) {
+        throw err
+      }
+      return await p.create(path)
+    }
+  }
+
+  // npm pkg fix
+  static async fix (path, opts) {
+    const p = new PackageJson()
+    await p.load(path, true)
+    return p.fix(opts)
+  }
+
+  // read-package-json compatible behavior
+  static async prepare (path, opts) {
+    const p = new PackageJson()
+    await p.load(path, true)
+    return p.prepare(opts)
+  }
+
+  // read-package-json-fast compatible behavior
+  static async normalize (path, opts) {
+    const p = new PackageJson()
+    await p.load(path)
+    return p.normalize(opts)
+  }
+
+  #path
+  #manifest
+  #readFileContent = ''
+  #canSave = true
+
+  // Load content from given path
+  async load (path, parseIndex) {
+    this.#path = path
+    let parseErr
+    try {
+      this.#readFileContent = await read(this.filename)
+    } catch (err) {
+      if (!parseIndex) {
+        throw err
+      }
+      parseErr = err
+    }
+
+    if (parseErr) {
+      const indexFile = resolve(this.path, 'index.js')
+      let indexFileContent
+      try {
+        indexFileContent = await readFile(indexFile, 'utf8')
+      } catch (err) {
+        throw parseErr
+      }
+      try {
+        this.fromComment(indexFileContent)
+      } catch (err) {
+        throw parseErr
+      }
+      // This wasn't a package.json so prevent saving
+      this.#canSave = false
+      return this
+    }
+
+    return this.fromJSON(this.#readFileContent)
+  }
+
+  // Load data from a JSON string/buffer
+  fromJSON (data) {
+    this.#manifest = parse(data)
+    return this
+  }
+
+  // Manually set data from an existing object
+  fromContent (data) {
+    if (!data || typeof data !== 'object') {
+      throw new Error('Content data must be an object')
+    }
+    this.#manifest = data
+    this.#canSave = false
+    return this
+  }
+
+  // Load data from a comment
+  // /**package { "name": "foo", "version": "1.2.3", ... } **/
+  fromComment (data) {
+    data = data.split(/^\/\*\*package(?:\s|$)/m)
+
+    if (data.length < 2) {
+      throw new Error('File has no package in comments')
+    }
+    data = data[1]
+    data = data.split(/\*\*\/$/m)
+
+    if (data.length < 2) {
+      throw new Error('File has no package in comments')
+    }
+    data = data[0]
+    data = data.replace(/^\s*\*/mg, '')
+
+    this.#manifest = parseJSON(data)
+    return this
+  }
+
+  get content () {
+    return this.#manifest
+  }
+
+  get path () {
+    return this.#path
+  }
+
+  get filename () {
+    if (this.path) {
+      return resolve(this.path, 'package.json')
+    }
+    return undefined
+  }
+
+  create (path) {
+    this.#path = path
+    this.#manifest = {}
+    return this
+  }
+
+  // This should be the ONLY way to set content in the manifest
+  update (content) {
+    if (!this.content) {
+      throw new Error('Can not update without content.  Please `load` or `create`')
+    }
+
+    for (const step of knownSteps) {
+      this.#manifest = step({ content, originalContent: this.content })
+    }
+
+    // unknown properties will just be overwritten
+    for (const [key, value] of Object.entries(content)) {
+      if (!knownKeys.has(key)) {
+        this.content[key] = value
+      }
+    }
+
+    return this
+  }
+
+  async save ({ sort } = {}) {
+    if (!this.#canSave) {
+      throw new Error('No package.json to save to')
+    }
+    const {
+      [Symbol.for('indent')]: indent,
+      [Symbol.for('newline')]: newline,
+      ...rest
+    } = this.content
+
+    const format = indent === undefined ? '  ' : indent
+    const eol = newline === undefined ? '\n' : newline
+
+    const content = sort ? packageSort(rest) : rest
+
+    const fileContent = `${
+      JSON.stringify(content, null, format)
+    }\n`
+      .replace(/\n/g, eol)
+
+    if (fileContent.trim() !== this.#readFileContent.trim()) {
+      const written = await writeFile(this.filename, fileContent)
+      this.#readFileContent = fileContent
+      return written
+    }
+  }
+
+  // steps is NOT overrideable here because this is a legacy function that's not being used in new places
+  syncNormalize (opts = {}) {
+    opts.steps = this.constructor.normalizeSteps.filter(s => s !== '_attributes')
+    syncNormalize(this, opts)
+    return this
+  }
+
+  async normalize (opts = {}) {
+    if (!opts.steps) {
+      opts.steps = this.constructor.normalizeSteps
+    }
+    await normalize(this, opts)
+    return this
+  }
+
+  async prepare (opts = {}) {
+    if (!opts.steps) {
+      opts.steps = this.constructor.prepareSteps
+    }
+    await normalize(this, opts)
+    return this
+  }
+
+  async fix (opts = {}) {
+    // This one is not overridable
+    opts.steps = this.constructor.fixSteps
+    await normalize(this, opts)
+    return this
+  }
+}
+
+module.exports = PackageJson
+
+
+/***/ }),
+
+/***/ 82117:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+// This is an implementation of the validForNewPackage flag in validate-npm-package-license, which is no longer maintained
+
+const parse = __nccwpck_require__(93326)
+
+function usesLicenseRef (ast) {
+  if (Object.hasOwn(ast, 'license')) {
+    return ast.license.startsWith('LicenseRef') || ast.license.startsWith('DocumentRef')
+  } else {
+    return usesLicenseRef(ast.left) || usesLicenseRef(ast.right)
+  }
+}
+
+// license should be a valid SPDX license expression (without "LicenseRef"), "UNLICENSED", or "SEE LICENSE IN <filename>"
+module.exports = function licenseValidForNewPackage (argument) {
+  if (argument === 'UNLICENSED' || argument === 'UNLICENCED') {
+    return true
+  }
+  if (/^SEE LICEN[CS]E IN ./.test(argument)) {
+    return true
+  }
+  try {
+    const ast = parse(argument)
+    return !usesLicenseRef(ast)
+  } catch {
+    return false
+  }
+}
+
+
+/***/ }),
+
+/***/ 43338:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+// Originally normalize-package-data
+
+const { URL } = __nccwpck_require__(73136)
+const hostedGitInfo = __nccwpck_require__(25010)
+const validateLicense = __nccwpck_require__(82117)
+
+const typos = {
+  dependancies: 'dependencies',
+  dependecies: 'dependencies',
+  depdenencies: 'dependencies',
+  devEependencies: 'devDependencies',
+  depends: 'dependencies',
+  'dev-dependencies': 'devDependencies',
+  devDependences: 'devDependencies',
+  devDepenencies: 'devDependencies',
+  devdependencies: 'devDependencies',
+  repostitory: 'repository',
+  repo: 'repository',
+  prefereGlobal: 'preferGlobal',
+  hompage: 'homepage',
+  hampage: 'homepage',
+  autohr: 'author',
+  autor: 'author',
+  contributers: 'contributors',
+  publicationConfig: 'publishConfig',
+  script: 'scripts',
+}
+
+const isEmail = str => str.includes('@') && (str.indexOf('@') < str.lastIndexOf('.'))
+
+// Extracts description from contents of a readme file in markdown format
+function extractDescription (description) {
+  // the first block of text before the first heading that isn't the first line heading
+  const lines = description.trim().split('\n')
+  let start = 0
+  // skip initial empty lines and lines that start with #
+  while (lines[start]?.trim().match(/^(#|$)/)) {
+    start++
+  }
+  let end = start + 1
+  // keep going till we get to the end or an empty line
+  while (end < lines.length && lines[end].trim()) {
+    end++
+  }
+  return lines.slice(start, end).join(' ').trim()
+}
+
+function stringifyPerson (person) {
+  if (typeof person !== 'string') {
+    const name = person.name || ''
+    const u = person.url || person.web
+    const wrappedUrl = u ? (' (' + u + ')') : ''
+    const e = person.email || person.mail
+    const wrappedEmail = e ? (' <' + e + '>') : ''
+    person = name + wrappedEmail + wrappedUrl
+  }
+  const matchedName = person.match(/^([^(<]+)/)
+  const matchedUrl = person.match(/\(([^()]+)\)/)
+  const matchedEmail = person.match(/<([^<>]+)>/)
+  const parsed = {}
+  if (matchedName?.[0].trim()) {
+    parsed.name = matchedName[0].trim()
+  }
+  if (matchedEmail) {
+    parsed.email = matchedEmail[1]
+  }
+  if (matchedUrl) {
+    parsed.url = matchedUrl[1]
+  }
+  return parsed
+}
+
+function normalizeData (data, changes) {
+  // fixDescriptionField
+  if (data.description && typeof data.description !== 'string') {
+    changes?.push(`'description' field should be a string`)
+    delete data.description
+  }
+  if (data.readme && !data.description && data.readme !== 'ERROR: No README data found!') {
+    data.description = extractDescription(data.readme)
+  }
+  if (data.description === undefined) {
+    delete data.description
+  }
+  if (!data.description) {
+    changes?.push('No description')
+  }
+
+  // fixModulesField
+  if (data.modules) {
+    changes?.push(`modules field is deprecated`)
+    delete data.modules
+  }
+
+  // fixFilesField
+  const files = data.files
+  if (files && !Array.isArray(files)) {
+    changes?.push(`Invalid 'files' member`)
+    delete data.files
+  } else if (data.files) {
+    data.files = data.files.filter(function (file) {
+      if (!file || typeof file !== 'string') {
+        changes?.push(`Invalid filename in 'files' list: ${file}`)
+        return false
+      } else {
+        return true
+      }
+    })
+  }
+
+  // fixManField
+  if (data.man && typeof data.man === 'string') {
+    data.man = [data.man]
+  }
+
+  // fixBugsField
+  if (!data.bugs && data.repository?.url) {
+    const hosted = hostedGitInfo.fromUrl(data.repository.url)
+    if (hosted && hosted.bugs()) {
+      data.bugs = { url: hosted.bugs() }
+    }
+  } else if (data.bugs) {
+    if (typeof data.bugs === 'string') {
+      if (isEmail(data.bugs)) {
+        data.bugs = { email: data.bugs }
+      } else if (URL.canParse(data.bugs)) {
+        data.bugs = { url: data.bugs }
+      } else {
+        changes?.push(`Bug string field must be url, email, or {email,url}`)
+      }
+    } else {
+      for (const k in data.bugs) {
+        if (['web', 'name'].includes(k)) {
+          changes?.push(`bugs['${k}'] should probably be bugs['url'].`)
+          data.bugs.url = data.bugs[k]
+          delete data.bugs[k]
+        }
+      }
+      const oldBugs = data.bugs
+      data.bugs = {}
+      if (oldBugs.url) {
+        if (URL.canParse(oldBugs.url)) {
+          data.bugs.url = oldBugs.url
+        } else {
+          changes?.push('bugs.url field must be a string url. Deleted.')
+        }
+      }
+      if (oldBugs.email) {
+        if (typeof (oldBugs.email) === 'string' && isEmail(oldBugs.email)) {
+          data.bugs.email = oldBugs.email
+        } else {
+          changes?.push('bugs.email field must be a string email. Deleted.')
+        }
+      }
+    }
+    if (!data.bugs.email && !data.bugs.url) {
+      delete data.bugs
+      changes?.push('Normalized value of bugs field is an empty object. Deleted.')
+    }
+  }
+  // fixKeywordsField
+  if (typeof data.keywords === 'string') {
+    data.keywords = data.keywords.split(/,\s+/)
+  }
+  if (data.keywords && !Array.isArray(data.keywords)) {
+    delete data.keywords
+    changes?.push(`keywords should be an array of strings`)
+  } else if (data.keywords) {
+    data.keywords = data.keywords.filter(function (kw) {
+      if (typeof kw !== 'string' || !kw) {
+        changes?.push(`keywords should be an array of strings`)
+        return false
+      } else {
+        return true
+      }
+    })
+  }
+  // fixBundleDependenciesField
+  const bdd = 'bundledDependencies'
+  const bd = 'bundleDependencies'
+  if (data[bdd] && !data[bd]) {
+    data[bd] = data[bdd]
+    delete data[bdd]
+  }
+  if (data[bd] && !Array.isArray(data[bd])) {
+    changes?.push(`Invalid 'bundleDependencies' list. Must be array of package names`)
+    delete data[bd]
+  } else if (data[bd]) {
+    data[bd] = data[bd].filter(function (filtered) {
+      if (!filtered || typeof filtered !== 'string') {
+        changes?.push(`Invalid bundleDependencies member: ${filtered}`)
+        return false
+      } else {
+        if (!data.dependencies) {
+          data.dependencies = {}
+        }
+        if (!Object.prototype.hasOwnProperty.call(data.dependencies, filtered)) {
+          changes?.push(`Non-dependency in bundleDependencies: ${filtered}`)
+          data.dependencies[filtered] = '*'
+        }
+        return true
+      }
+    })
+  }
+  // fixHomepageField
+  if (!data.homepage && data.repository && data.repository.url) {
+    const hosted = hostedGitInfo.fromUrl(data.repository.url)
+    if (hosted) {
+      data.homepage = hosted.docs()
+    }
+  }
+  if (data.homepage) {
+    if (typeof data.homepage !== 'string') {
+      changes?.push('homepage field must be a string url. Deleted.')
+      delete data.homepage
+    } else {
+      if (!URL.canParse(data.homepage)) {
+        data.homepage = 'http://' + data.homepage
+      }
+    }
+  }
+  // fixReadmeField
+  if (!data.readme) {
+    changes?.push('No README data')
+    data.readme = 'ERROR: No README data found!'
+  }
+  // fixLicenseField
+  const license = data.license || data.licence
+  if (!license) {
+    changes?.push('No license field.')
+  } else if (typeof (license) !== 'string' || license.length < 1 || license.trim() === '') {
+    changes?.push('license should be a valid SPDX license expression')
+  } else if (!validateLicense(license)) {
+    changes?.push('license should be a valid SPDX license expression')
+  }
+  // fixPeople
+  if (data.author) {
+    data.author = stringifyPerson(data.author)
+  }
+  ['maintainers', 'contributors'].forEach(function (set) {
+    if (!Array.isArray(data[set])) {
+      return
+    }
+    data[set] = data[set].map(stringifyPerson)
+  })
+  // fixTypos
+  for (const d in typos) {
+    if (Object.prototype.hasOwnProperty.call(data, d)) {
+      changes?.push(`${d} should probably be ${typos[d]}.`)
+    }
+  }
+}
+
+module.exports = { normalizeData }
+
+
+/***/ }),
+
+/***/ 8145:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const valid = __nccwpck_require__(58780)
+const clean = __nccwpck_require__(1799)
+const fs = __nccwpck_require__(51455)
+const path = __nccwpck_require__(76760)
+const { log } = __nccwpck_require__(89818)
+const moduleBuiltin = __nccwpck_require__(98995)
+
+/**
+ * @type {import('hosted-git-info')}
+ */
+let _hostedGitInfo
+function lazyHostedGitInfo () {
+  if (!_hostedGitInfo) {
+    _hostedGitInfo = __nccwpck_require__(25010)
+  }
+  return _hostedGitInfo
+}
+
+/**
+ * @type {import('glob').glob}
+ */
+let _glob
+function lazyLoadGlob () {
+  if (!_glob) {
+    _glob = (__nccwpck_require__(8941).glob)
+  }
+  return _glob
+}
+
+// used to be npm-normalize-package-bin
+function normalizePackageBin (pkg, changes) {
+  if (pkg.bin) {
+    if (typeof pkg.bin === 'string' && pkg.name) {
+      changes?.push('"bin" was converted to an object')
+      pkg.bin = { [pkg.name]: pkg.bin }
+    } else if (Array.isArray(pkg.bin)) {
+      changes?.push('"bin" was converted to an object')
+      pkg.bin = pkg.bin.reduce((acc, k) => {
+        acc[path.basename(k)] = k
+        return acc
+      }, {})
+    }
+    if (typeof pkg.bin === 'object') {
+      for (const binKey in pkg.bin) {
+        if (typeof pkg.bin[binKey] !== 'string') {
+          delete pkg.bin[binKey]
+          changes?.push(`removed invalid "bin[${binKey}]"`)
+          continue
+        }
+        const base = path.basename(secureAndUnixifyPath(binKey))
+        if (!base) {
+          delete pkg.bin[binKey]
+          changes?.push(`removed invalid "bin[${binKey}]"`)
+          continue
+        }
+
+        const binTarget = secureAndUnixifyPath(pkg.bin[binKey])
+
+        if (!binTarget) {
+          delete pkg.bin[binKey]
+          changes?.push(`removed invalid "bin[${binKey}]"`)
+          continue
+        }
+
+        if (base !== binKey) {
+          delete pkg.bin[binKey]
+          changes?.push(`"bin[${binKey}]" was renamed to "bin[${base}]"`)
+        }
+        if (binTarget !== pkg.bin[binKey]) {
+          changes?.push(`"bin[${base}]" script name ${binTarget} was invalid and removed`)
+        }
+        pkg.bin[base] = binTarget
+      }
+
+      if (Object.keys(pkg.bin).length === 0) {
+        changes?.push('empty "bin" was removed')
+        delete pkg.bin
+      }
+
+      return pkg
+    }
+  }
+  delete pkg.bin
+}
+
+function normalizePackageMan (pkg, changes) {
+  if (pkg.man) {
+    const mans = []
+    for (const man of (Array.isArray(pkg.man) ? pkg.man : [pkg.man])) {
+      if (typeof man !== 'string') {
+        changes?.push(`removed invalid "man [${man}]"`)
+      } else {
+        mans.push(secureAndUnixifyPath(man))
+      }
+    }
+
+    if (!mans.length) {
+      changes?.push('empty "man" was removed')
+    } else {
+      pkg.man = mans
+      return pkg
+    }
+  }
+  delete pkg.man
+}
+
+function isCorrectlyEncodedName (spec) {
+  return !spec.match(/[/@\s+%:]/) &&
+    spec === encodeURIComponent(spec)
+}
+
+function isValidScopedPackageName (spec) {
+  if (spec.charAt(0) !== '@') {
+    return false
+  }
+
+  const rest = spec.slice(1).split('/')
+  if (rest.length !== 2) {
+    return false
+  }
+
+  return rest[0] && rest[1] &&
+    rest[0] === encodeURIComponent(rest[0]) &&
+    rest[1] === encodeURIComponent(rest[1])
+}
+
+function unixifyPath (ref) {
+  return ref.replace(/\\|:/g, '/')
+}
+
+function secureAndUnixifyPath (ref) {
+  const secured = unixifyPath(path.join('.', path.join('/', unixifyPath(ref))))
+  return secured.startsWith('./') ? '' : secured
+}
+
+// Only steps that can be ran synchronously. There are some object constructors (i.e. Aborist Node) that need synchronous normalization so here we are.
+function syncSteps (pkg, { strict, steps, changes, allowLegacyCase }) {
+  const data = pkg.content
+  const pkgId = `${data.name ?? ''}@${data.version ?? ''}`
+
+  // name and version are load bearing so we have to clean them up first
+  if (steps.includes('fixName') || steps.includes('fixNameField') || steps.includes('normalizeData')) {
+    if (!data.name && !strict) {
+      changes?.push('Missing "name" field was set to an empty string')
+      data.name = ''
+    } else {
+      if (typeof data.name !== 'string') {
+        throw new Error('name field must be a string.')
+      }
+      if (!strict) {
+        const name = data.name.trim()
+        if (data.name !== name) {
+          changes?.push(`Whitespace was trimmed from "name"`)
+          data.name = name
+        }
+      }
+
+      if (data.name.startsWith('.') ||
+        !(isValidScopedPackageName(data.name) || isCorrectlyEncodedName(data.name)) ||
+        (strict && (!allowLegacyCase) && data.name !== data.name.toLowerCase()) ||
+        data.name.toLowerCase() === 'node_modules' ||
+        data.name.toLowerCase() === 'favicon.ico') {
+        throw new Error('Invalid name: ' + JSON.stringify(data.name))
+      }
+    }
+  }
+
+  if (steps.includes('fixName')) {
+    // Check for conflicts with builtin modules
+    if (moduleBuiltin.builtinModules.includes(data.name)) {
+      log.warn('package-json', pkgId, `Package name "${data.name}" conflicts with a Node.js built-in module name`)
+    }
+  }
+
+  if (steps.includes('fixVersionField') || steps.includes('normalizeData')) {
+    // allow "loose" semver 1.0 versions in non-strict mode
+    // enforce strict semver 2.0 compliance in strict mode
+    const loose = !strict
+    if (!data.version) {
+      data.version = ''
+    } else {
+      if (!valid(data.version, loose)) {
+        throw new Error(`Invalid version: "${data.version}"`)
+      }
+      const version = clean(data.version, loose)
+      if (version !== data.version) {
+        changes?.push(`"version" was cleaned and set to "${version}"`)
+        data.version = version
+      }
+    }
+  }
+
+  // remove attributes that start with "_"
+  if (steps.includes('_attributes')) {
+    for (const key in data) {
+      if (key.startsWith('_')) {
+        changes?.push(`"${key}" was removed`)
+        delete pkg.content[key]
+      }
+    }
+  }
+
+  // build the "_id" attribute
+  if (steps.includes('_id')) {
+    if (data.name && data.version) {
+      changes?.push(`"_id" was set to ${pkgId}`)
+      data._id = pkgId
+    }
+  }
+
+  // fix bundledDependencies typo
+  if (steps.includes('bundledDependencies')) {
+    if (data.bundleDependencies === undefined && data.bundledDependencies !== undefined) {
+      data.bundleDependencies = data.bundledDependencies
+      changes?.push(`Deleted incorrect "bundledDependencies"`)
+    }
+    delete data.bundledDependencies
+  }
+
+  // expand "bundleDependencies: true or translate from object"
+  if (steps.includes('bundleDependencies')) {
+    const bd = data.bundleDependencies
+    if (bd === false && !steps.includes('bundleDependenciesDeleteFalse')) {
+      changes?.push(`"bundleDependencies" was changed from "false" to "[]"`)
+      data.bundleDependencies = []
+    } else if (bd === true) {
+      changes?.push(`"bundleDependencies" was auto-populated from "dependencies"`)
+      data.bundleDependencies = Object.keys(data.dependencies || {})
+    } else if (bd && typeof bd === 'object') {
+      if (!Array.isArray(bd)) {
+        changes?.push(`"bundleDependencies" was changed from an object to an array`)
+        data.bundleDependencies = Object.keys(bd)
+      }
+    } else if ('bundleDependencies' in data) {
+      changes?.push(`"bundleDependencies" was removed`)
+      delete data.bundleDependencies
+    }
+  }
+
+  // normalize the shape of the top-level "overrides" field after this step it is either absent or a non-empty object, so consumers do not need to defensively check the type/size
+  if (steps.includes('overrides')) {
+    const ov = data.overrides
+    if (ov !== undefined) {
+      const isObject = ov && typeof ov === 'object' && !Array.isArray(ov)
+      if (!isObject) {
+        changes?.push(`"overrides" was removed (must be an object)`)
+        delete data.overrides
+      } else if (Object.keys(ov).length === 0) {
+        changes?.push(`Empty "overrides" was removed`)
+        delete data.overrides
+      }
+    }
+  }
+
+  // It was once common practice to list deps both in optionalDependencies and in dependencies, to support npm versions that did not know about optionalDependencies.
+  // This is no longer a relevant need, so duplicating the deps in two places is unnecessary and excessive.
+  if (steps.includes('optionalDedupe')) {
+    if (data.dependencies &&
+      data.optionalDependencies && typeof data.optionalDependencies === 'object') {
+      for (const name in data.optionalDependencies) {
+        changes?.push(`optionalDependencies."${name}" was removed`)
+        delete data.dependencies[name]
+      }
+      if (!Object.keys(data.dependencies).length) {
+        changes?.push(`Empty "optionalDependencies" was removed`)
+        delete data.dependencies
+      }
+    }
+  }
+
+  // strip "node_modules/.bin" from scripts entries
+  // remove invalid scripts entries (non-strings)
+  if ((steps.includes('scripts') || steps.includes('scriptpath')) && data.scripts !== undefined) {
+    const spre = /^(\.[/\\])?node_modules[/\\].bin[\\/]/
+    if (typeof data.scripts === 'object') {
+      for (const name in data.scripts) {
+        if (typeof data.scripts[name] !== 'string') {
+          delete data.scripts[name]
+          changes?.push(`Invalid scripts."${name}" was removed`)
+        } else if (steps.includes('scriptpath') && spre.test(data.scripts[name])) {
+          data.scripts[name] = data.scripts[name].replace(spre, '')
+          changes?.push(`scripts entry "${name}" was fixed to remove node_modules/.bin reference`)
+        }
+      }
+    } else {
+      changes?.push(`Removed invalid "scripts"`)
+      delete data.scripts
+    }
+  }
+
+  if (steps.includes('funding')) {
+    if (data.funding && typeof data.funding === 'string') {
+      data.funding = { url: data.funding }
+      changes?.push(`"funding" was changed to an object with a url attribute`)
+    }
+  }
+
+  // "normalizeData" from "read-package-json", which was just a call through to
+  // "normalize-package-data".  We only call the "fixer" functions because
+  // outside of that it was also clobbering _id (which we already conditionally
+  // do) and also adding the gypfile script (which we also already
+  // conditionally do)
+
+  // Some steps are isolated so we can do a limited subset of these in `fix`
+  if (steps.includes('fixRepositoryField') || steps.includes('normalizeData')) {
+    if (data.repositories) {
+      changes?.push(`"repository" was set to the first entry in "repositories" (${data.repository})`)
+      data.repository = data.repositories[0]
+    }
+    if (data.repository) {
+      if (typeof data.repository === 'string') {
+        changes?.push('"repository" was changed from a string to an object')
+        data.repository = {
+          type: 'git',
+          url: data.repository,
+        }
+      }
+      if (data.repository.url) {
+        const hosted = lazyHostedGitInfo().fromUrl(data.repository.url)
+        let r
+        if (hosted) {
+          if (hosted.getDefaultRepresentation() === 'shortcut') {
+            r = hosted.https()
+          } else {
+            r = hosted.toString()
+          }
+          if (r !== data.repository.url) {
+            changes?.push(`"repository.url" was normalized to "${r}"`)
+            data.repository.url = r
+          }
+        }
+      }
+    }
+  }
+
+  if (steps.includes('fixDependencies') || steps.includes('normalizeData')) {
+    // peerDependencies?
+    // devDependencies is meaningless here, it's ignored on an installed package
+    for (const type of ['dependencies', 'devDependencies', 'optionalDependencies']) {
+      if (data[type]) {
+        let secondWarning = true
+        if (typeof data[type] === 'string') {
+          changes?.push(`"${type}" was converted from a string into an object`)
+          data[type] = data[type].trim().split(/[\n\r\s\t ,]+/)
+          secondWarning = false
+        }
+        if (Array.isArray(data[type])) {
+          if (secondWarning) {
+            changes?.push(`"${type}" was converted from an array into an object`)
+          }
+          const o = {}
+          for (const d of data[type]) {
+            if (typeof d === 'string') {
+              const dep = d.trim().split(/(:?[@\s><=])/)
+              const dn = dep.shift()
+              const dv = dep.join('').replace(/^@/, '').trim()
+              o[dn] = dv
+            }
+          }
+          data[type] = o
+        }
+      }
+    }
+    // normalize-package-data used to put optional dependencies BACK into dependencies here, we no longer do this
+
+    for (const deps of ['dependencies', 'devDependencies']) {
+      if (deps in data) {
+        if (!data[deps] || typeof data[deps] !== 'object') {
+          changes?.push(`Removed invalid "${deps}"`)
+          delete data[deps]
+        } else {
+          for (const d in data[deps]) {
+            const r = data[deps][d]
+            if (typeof r !== 'string') {
+              changes?.push(`Removed invalid "${deps}.${d}"`)
+              delete data[deps][d]
+            }
+            const hosted = lazyHostedGitInfo().fromUrl(data[deps][d])?.toString()
+            if (hosted && hosted !== data[deps][d]) {
+              changes?.push(`Normalized git reference to "${deps}.${d}"`)
+              data[deps][d] = hosted.toString()
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // TODO some of this is duplicated in other steps here, a future breaking change may be able to remove the duplicates involved in this step
+  if (steps.includes('normalizeData')) {
+    const { normalizeData } = __nccwpck_require__(43338)
+    normalizeData(data, changes)
+  }
+}
+
+// Steps that require await, distinct from sync-steps.js
+async function asyncSteps (pkg, { steps, root, changes }) {
+  const data = pkg.content
+  const scripts = data.scripts || {}
+  const pkgId = `${data.name ?? ''}@${data.version ?? ''}`
+
+  // add "install" attribute if any "*.gyp" files exist
+  if (steps.includes('gypfile')) {
+    if (!scripts.install && !scripts.preinstall && data.gypfile !== false) {
+      const files = await lazyLoadGlob()('*.gyp', { cwd: pkg.path })
+      if (files.length) {
+        scripts.install = 'node-gyp rebuild'
+        data.scripts = scripts
+        data.gypfile = true
+        changes?.push(`"scripts.install" was set to "node-gyp rebuild"`)
+        changes?.push(`"gypfile" was set to "true"`)
+      }
+    }
+  }
+
+  // populate "authors" attribute
+  if (steps.includes('authors') && !data.contributors) {
+    try {
+      const authorData = await fs.readFile(path.join(pkg.path, 'AUTHORS'), 'utf8')
+      const authors = authorData.split(/\r?\n/g)
+        .map(line => line.replace(/^\s*#.*$/, '').trim())
+        .filter(line => line)
+      data.contributors = authors
+      changes?.push('"contributors" was auto-populated with the contents of the "AUTHORS" file')
+    } catch {
+      // do nothing
+    }
+  }
+
+  // populate "readme" attribute
+  if (steps.includes('readme') && !data.readme) {
+    const mdre = /\.m?a?r?k?d?o?w?n?$/i
+    const files = await lazyLoadGlob()('{README,README.*}', {
+      cwd: pkg.path,
+      nocase: true,
+      mark: true,
+    })
+    let readmeFile
+    for (const file of files) {
+      // don't accept directories.
+      if (!file.endsWith(path.sep)) {
+        if (file.match(mdre)) {
+          readmeFile = file
+          break
+        }
+        if (file.endsWith('README')) {
+          readmeFile = file
+        }
+      }
+    }
+    if (readmeFile) {
+      const readmeData = await fs.readFile(path.join(pkg.path, readmeFile), 'utf8')
+      data.readme = readmeData
+      data.readmeFilename = readmeFile
+      changes?.push(`"readme" was set to the contents of ${readmeFile}`)
+      changes?.push(`"readmeFilename" was set to ${readmeFile}`)
+    }
+    if (!data.readme) {
+      data.readme = 'ERROR: No README data found!'
+    }
+  }
+
+  // expand directories.man
+  if (steps.includes('mans')) {
+    if (data.directories?.man && !data.man) {
+      const manDir = secureAndUnixifyPath(data.directories.man)
+      const cwd = path.resolve(pkg.path, manDir)
+      const files = await lazyLoadGlob()('**/*.[0-9]', { cwd })
+      data.man = files.map(man =>
+        path.relative(pkg.path, path.join(cwd, man)).split(path.sep).join('/')
+      )
+    }
+    normalizePackageMan(data, changes)
+  }
+
+  // expand "directories.bin"
+  if (steps.includes('binDir') && data.directories?.bin && !data.bin && pkg.path) {
+    const binPath = secureAndUnixifyPath(data.directories.bin)
+    const bins = await lazyLoadGlob()('**', { cwd: path.resolve(pkg.path, binPath) })
+    data.bin = bins.reduce((acc, binFile) => {
+      if (binFile && !binFile.startsWith('.')) {
+        const binName = path.basename(binFile)
+        // binPath is already cleaned and unixified, no need to path.join here.
+        acc[binName] = `${binPath}/${secureAndUnixifyPath(binFile)}`
+      }
+      return acc
+    }, {})
+  } else if (steps.includes('bin') || steps.includes('binDir') || steps.includes('binRefs')) {
+    normalizePackageBin(data, changes)
+  }
+
+  // populate "gitHead" attribute
+  if (steps.includes('gitHead') && !data.gitHead) {
+    const git = __nccwpck_require__(61133)
+    const gitRoot = await git.find({ cwd: pkg.path, root })
+    let head
+    if (gitRoot) {
+      try {
+        head = await fs.readFile(path.resolve(gitRoot, '.git/HEAD'), 'utf8')
+      } catch (err) {
+      // do nothing
+      }
+    }
+    let headData
+    if (head) {
+      if (head.startsWith('ref: ')) {
+        const headRef = head.replace(/^ref: /, '').trim()
+        const headFile = path.resolve(gitRoot, '.git', headRef)
+        try {
+          headData = await fs.readFile(headFile, 'utf8')
+          headData = headData.replace(/^ref: /, '').trim()
+        } catch (err) {
+          // do nothing
+        }
+        if (!headData) {
+          const packFile = path.resolve(gitRoot, '.git/packed-refs')
+          try {
+            let refs = await fs.readFile(packFile, 'utf8')
+            if (refs) {
+              refs = refs.split('\n')
+              for (let i = 0; i < refs.length; i++) {
+                const match = refs[i].match(/^([0-9a-f]{40}) (.+)$/)
+                if (match && match[2].trim() === headRef) {
+                  headData = match[1]
+                  break
+                }
+              }
+            }
+          } catch {
+            // do nothing
+          }
+        }
+      } else {
+        headData = head.trim()
+      }
+    }
+    if (headData) {
+      data.gitHead = headData
+    }
+  }
+
+  // populate "types" attribute
+  if (steps.includes('fillTypes')) {
+    const index = data.main || 'index.js'
+
+    if (typeof index !== 'string') {
+      throw new TypeError('The "main" attribute must be of type string.')
+    }
+
+    // TODO exports is much more complicated than this in verbose format
+    // We need to support for instance
+
+    // "exports": {
+    //   ".": [
+    //     {
+    //       "default": "./lib/npm.js"
+    //     },
+    //     "./lib/npm.js"
+    //   ],
+    //   "./package.json": "./package.json"
+    // },
+    // as well as conditional exports
+
+    // if (data.exports && typeof data.exports === 'string') {
+    //   index = data.exports
+    // }
+
+    // if (data.exports && data.exports['.']) {
+    //   index = data.exports['.']
+    //   if (typeof index !== 'string') {
+    //   }
+    // }
+    const extless = path.join(path.dirname(index), path.basename(index, path.extname(index)))
+    const dts = `./${extless}.d.ts`
+    const hasDTSFields = 'types' in data || 'typings' in data
+    if (!hasDTSFields) {
+      try {
+        await fs.access(path.join(pkg.path, dts))
+        data.types = dts.split(path.sep).join('/')
+      } catch {
+        // do nothing
+      }
+    }
+  }
+
+  // Warn if the bin references don't point to anything.
+  // This might be better in normalize-package-data if it had access to the file path.
+  if (steps.includes('binRefs') && data.bin instanceof Object) {
+    for (const key in data.bin) {
+      try {
+        await fs.access(path.resolve(pkg.path, data.bin[key]))
+      } catch {
+        log.warn('package-json', pkgId, `No bin file found at ${data.bin[key]}`)
+        // XXX: should a future breaking change delete bin entries that cannot be accessed?
+      }
+    }
+  }
+}
+
+// We don't want the `changes` array in here by default because this is a hot path for parsing packuments during install.
+// The calling method passes it in if it wants to track changes.
+async function normalize (pkg, opts) {
+  if (!pkg.content) {
+    throw new Error('Can not normalize without content')
+  }
+  await asyncSteps(pkg, opts)
+  // the normalizeData part of this needs to be the last thing ran, so sync comes second
+  syncSteps(pkg, opts)
+}
+
+function syncNormalize (pkg, opts) {
+  syncSteps(pkg, opts)
+}
+
+module.exports = { normalize, syncNormalize }
+
+
+/***/ }),
+
+/***/ 6841:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+// This is JUST the code needed to open a package.json file and parse it.
+// It's isolated out so that code needing to parse a package.json file can do so in the same way as this module does, without needing to require the whole module, or needing to require the underlying parsing library.
+
+const { readFile } = __nccwpck_require__(91943)
+const parseJSON = __nccwpck_require__(77223)
+
+async function read (filename) {
+  try {
+    const data = await readFile(filename, 'utf8')
+    return data
+  } catch (err) {
+    err.message = `Could not read package.json: ${err}`
+    throw err
+  }
+}
+
+function parse (data) {
+  try {
+    const content = parseJSON(data)
+    return content
+  } catch (err) {
+    err.message = `Invalid package.json: ${err}`
+    throw err
+  }
+}
+
+// This is what most external libs will use.
+// PackageJson will call read and parse separately
+async function readPackage (filename) {
+  const data = await read(filename)
+  const content = parse(data)
+  return content
+}
+
+module.exports = {
+  read,
+  parse,
+  readPackage,
+}
+
+
+/***/ }),
+
+/***/ 4664:
+/***/ ((module) => {
+
+/**
+ * arbitrary sort order for package.json largely pulled from:
+ * https://github.com/keithamus/sort-package-json/blob/main/defaultRules.md
+ *
+ * cross checked with:
+ * https://github.com/npm/types/blob/main/types/index.d.ts#L104
+ * https://docs.npmjs.com/cli/configuring-npm/package-json
+ */
+function packageSort (json) {
+  const {
+    name,
+    version,
+    private: isPrivate,
+    description,
+    keywords,
+    homepage,
+    bugs,
+    repository,
+    funding,
+    license,
+    author,
+    maintainers,
+    contributors,
+    type,
+    imports,
+    exports,
+    main,
+    browser,
+    types,
+    bin,
+    man,
+    directories,
+    files,
+    workspaces,
+    scripts,
+    config,
+    dependencies,
+    devDependencies,
+    peerDependencies,
+    peerDependenciesMeta,
+    optionalDependencies,
+    bundledDependencies,
+    bundleDependencies,
+    engines,
+    os,
+    cpu,
+    publishConfig,
+    devEngines,
+    licenses,
+    overrides,
+    ...rest
+  } = json
+
+  return {
+    ...(typeof name !== 'undefined' ? { name } : {}),
+    ...(typeof version !== 'undefined' ? { version } : {}),
+    ...(typeof isPrivate !== 'undefined' ? { private: isPrivate } : {}),
+    ...(typeof description !== 'undefined' ? { description } : {}),
+    ...(typeof keywords !== 'undefined' ? { keywords } : {}),
+    ...(typeof homepage !== 'undefined' ? { homepage } : {}),
+    ...(typeof bugs !== 'undefined' ? { bugs } : {}),
+    ...(typeof repository !== 'undefined' ? { repository } : {}),
+    ...(typeof funding !== 'undefined' ? { funding } : {}),
+    ...(typeof license !== 'undefined' ? { license } : {}),
+    ...(typeof author !== 'undefined' ? { author } : {}),
+    ...(typeof maintainers !== 'undefined' ? { maintainers } : {}),
+    ...(typeof contributors !== 'undefined' ? { contributors } : {}),
+    ...(typeof type !== 'undefined' ? { type } : {}),
+    ...(typeof imports !== 'undefined' ? { imports } : {}),
+    ...(typeof exports !== 'undefined' ? { exports } : {}),
+    ...(typeof main !== 'undefined' ? { main } : {}),
+    ...(typeof browser !== 'undefined' ? { browser } : {}),
+    ...(typeof types !== 'undefined' ? { types } : {}),
+    ...(typeof bin !== 'undefined' ? { bin } : {}),
+    ...(typeof man !== 'undefined' ? { man } : {}),
+    ...(typeof directories !== 'undefined' ? { directories } : {}),
+    ...(typeof files !== 'undefined' ? { files } : {}),
+    ...(typeof workspaces !== 'undefined' ? { workspaces } : {}),
+    ...(typeof scripts !== 'undefined' ? { scripts } : {}),
+    ...(typeof config !== 'undefined' ? { config } : {}),
+    ...(typeof dependencies !== 'undefined' ? { dependencies } : {}),
+    ...(typeof devDependencies !== 'undefined' ? { devDependencies } : {}),
+    ...(typeof peerDependencies !== 'undefined' ? { peerDependencies } : {}),
+    ...(typeof peerDependenciesMeta !== 'undefined' ? { peerDependenciesMeta } : {}),
+    ...(typeof optionalDependencies !== 'undefined' ? { optionalDependencies } : {}),
+    ...(typeof bundledDependencies !== 'undefined' ? { bundledDependencies } : {}),
+    ...(typeof bundleDependencies !== 'undefined' ? { bundleDependencies } : {}),
+    ...(typeof engines !== 'undefined' ? { engines } : {}),
+    ...(typeof os !== 'undefined' ? { os } : {}),
+    ...(typeof cpu !== 'undefined' ? { cpu } : {}),
+    ...(typeof publishConfig !== 'undefined' ? { publishConfig } : {}),
+    ...(typeof devEngines !== 'undefined' ? { devEngines } : {}),
+    ...(typeof licenses !== 'undefined' ? { licenses } : {}),
+    ...(typeof overrides !== 'undefined' ? { overrides } : {}),
+    ...rest,
+  }
+}
+
+module.exports = {
+  packageSort,
+}
+
+
+/***/ }),
+
+/***/ 38543:
+/***/ ((module) => {
+
+const depTypes = new Set([
+  'dependencies',
+  'optionalDependencies',
+  'devDependencies',
+  'peerDependencies',
+])
+
+// sort alphabetically all types of deps for a given package
+const orderDeps = (content) => {
+  for (const type of depTypes) {
+    if (content && content[type]) {
+      content[type] = Object.keys(content[type])
+        .sort((a, b) => a.localeCompare(b, 'en'))
+        .reduce((res, key) => {
+          res[key] = content[type][key]
+          return res
+        }, {})
+    }
+  }
+  return content
+}
+
+const updateDependencies = ({ content, originalContent }) => {
+  const pkg = orderDeps({
+    ...content,
+  })
+
+  // optionalDependencies don't need to be repeated in two places
+  if (pkg.dependencies) {
+    if (pkg.optionalDependencies) {
+      for (const name of Object.keys(pkg.optionalDependencies)) {
+        delete pkg.dependencies[name]
+      }
+    }
+  }
+
+  const result = { ...originalContent }
+
+  // loop through all types of dependencies and update package json pkg
+  for (const type of depTypes) {
+    if (pkg[type]) {
+      result[type] = pkg[type]
+    }
+
+    // prune empty type props from resulting object
+    const emptyDepType =
+      pkg[type]
+      && typeof pkg === 'object'
+      && Object.keys(pkg[type]).length === 0
+    if (emptyDepType) {
+      delete result[type]
+    }
+  }
+
+  // if original package.json had dep in peerDeps AND deps, preserve that.
+  const { dependencies: origProd, peerDependencies: origPeer } =
+    originalContent || {}
+  const { peerDependencies: newPeer } = result
+  if (origProd && origPeer && newPeer) {
+    // we have original prod/peer deps, and new peer deps
+    // copy over any that were in both in the original
+    for (const name of Object.keys(origPeer)) {
+      if (origProd[name] !== undefined && newPeer[name] !== undefined) {
+        result.dependencies = result.dependencies || {}
+        result.dependencies[name] = newPeer[name]
+      }
+    }
+  }
+
+  return result
+}
+
+updateDependencies.knownKeys = depTypes
+
+module.exports = updateDependencies
+
+
+/***/ }),
+
+/***/ 87504:
+/***/ ((module) => {
+
+const updateScripts = ({ content, originalContent = {} }) => {
+  const newScripts = content.scripts
+
+  if (!newScripts) {
+    return originalContent
+  }
+
+  // validate scripts content being appended
+  const hasInvalidScripts = () =>
+    Object.entries(newScripts)
+      .some(([key, value]) =>
+        typeof key !== 'string' || typeof value !== 'string')
+  if (hasInvalidScripts()) {
+    throw Object.assign(
+      new TypeError(
+        'package.json scripts should be a key-value pair of strings.'),
+      { code: 'ESCRIPTSINVALID' }
+    )
+  }
+
+  return {
+    ...originalContent,
+    scripts: {
+      ...newScripts,
+    },
+  }
+}
+
+module.exports = updateScripts
+
+
+/***/ }),
+
+/***/ 80420:
+/***/ ((module) => {
+
+const updateWorkspaces = ({ content, originalContent = {} }) => {
+  const newWorkspaces = content.workspaces
+
+  if (!newWorkspaces) {
+    return originalContent
+  }
+
+  // validate workspaces content being appended
+  const hasInvalidWorkspaces = () =>
+    newWorkspaces.some(w => !(typeof w === 'string'))
+  if (!newWorkspaces.length || hasInvalidWorkspaces()) {
+    throw Object.assign(
+      new TypeError('workspaces should be an array of strings.'),
+      { code: 'EWORKSPACESINVALID' }
+    )
+  }
+
+  return {
+    ...originalContent,
+    workspaces: [
+      ...newWorkspaces,
+    ],
+  }
+}
+
+module.exports = updateWorkspaces
+
+
+/***/ }),
+
+/***/ 4599:
+/***/ ((module) => {
+
+"use strict";
+
+
+// this code adapted from: https://blogs.msdn.microsoft.com/twistylittlepassagesallalike/2011/04/23/everyone-quotes-command-line-arguments-the-wrong-way/
+const cmd = (input, doubleEscape) => {
+  if (!input.length) {
+    return '""'
+  }
+
+  let result
+  if (!/[ \t\n\v"]/.test(input)) {
+    result = input
+  } else {
+    result = '"'
+    for (let i = 0; i <= input.length; ++i) {
+      let slashCount = 0
+      while (input[i] === '\\') {
+        ++i
+        ++slashCount
+      }
+
+      if (i === input.length) {
+        result += '\\'.repeat(slashCount * 2)
+        break
+      }
+
+      if (input[i] === '"') {
+        result += '\\'.repeat(slashCount * 2 + 1)
+        result += input[i]
+      } else {
+        result += '\\'.repeat(slashCount)
+        result += input[i]
+      }
+    }
+    result += '"'
+  }
+
+  // and finally, prefix shell meta chars with a ^
+  result = result.replace(/[ !%^&()<>|"]/g, '^$&')
+  if (doubleEscape) {
+    result = result.replace(/[ !%^&()<>|"]/g, '^$&')
+  }
+
+  return result
+}
+
+const sh = (input) => {
+  if (!input.length) {
+    return `''`
+  }
+
+  if (!/[\t\n\r "#$&'()*;<>?\\`|~]/.test(input)) {
+    return input
+  }
+
+  // replace single quotes with '\'' and wrap the whole result in a fresh set of quotes
+  const result = `'${input.replace(/'/g, `'\\''`)}'`
+    // if the input string already had single quotes around it, clean those up
+    .replace(/^(?:'')+(?!$)/, '')
+    .replace(/\\'''/g, `\\'`)
+
+  return result
+}
+
+module.exports = {
+  cmd,
+  sh,
+}
+
+
+/***/ }),
+
+/***/ 42558:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+"use strict";
+
+
+const { spawn } = __nccwpck_require__(35317)
+const os = __nccwpck_require__(70857)
+const which = __nccwpck_require__(11189)
+
+const escape = __nccwpck_require__(4599)
+
+// 'extra' object is for decorating the error a bit more
+const promiseSpawn = (cmd, args, opts = {}, extra = {}) => {
+  if (opts.shell) {
+    return spawnWithShell(cmd, args, opts, extra)
+  }
+
+  let resolve, reject
+  const promise = new Promise((_resolve, _reject) => {
+    resolve = _resolve
+    reject = _reject
+  })
+
+  // Create error here so we have a more useful stack trace when rejecting
+  const closeError = new Error('command failed')
+
+  const stdout = []
+  const stderr = []
+
+  const getResult = (result) => ({
+    cmd,
+    args,
+    ...result,
+    ...stdioResult(stdout, stderr, opts),
+    ...extra,
+  })
+  const rejectWithOpts = (er, erOpts) => {
+    const resultError = getResult(erOpts)
+    reject(Object.assign(er, resultError))
+  }
+
+  const proc = spawn(cmd, args, opts)
+  promise.stdin = proc.stdin
+  promise.process = proc
+
+  proc.on('error', rejectWithOpts)
+
+  if (proc.stdout) {
+    proc.stdout.on('data', c => stdout.push(c))
+    proc.stdout.on('error', rejectWithOpts)
+  }
+
+  if (proc.stderr) {
+    proc.stderr.on('data', c => stderr.push(c))
+    proc.stderr.on('error', rejectWithOpts)
+  }
+
+  proc.on('close', (code, signal) => {
+    if (code || signal) {
+      rejectWithOpts(closeError, { code, signal })
+    } else {
+      resolve(getResult({ code, signal }))
+    }
+  })
+
+  return promise
+}
+
+const spawnWithShell = (cmd, args, opts, extra) => {
+  let command = opts.shell
+  // if shell is set to true, we use a platform default. we can't let the core
+  // spawn method decide this for us because we need to know what shell is in use
+  // ahead of time so that we can escape arguments properly. we don't need coverage here.
+  if (command === true) {
+    // istanbul ignore next
+    command = process.platform === 'win32' ? (process.env.ComSpec || 'cmd.exe') : 'sh'
+  }
+
+  const options = { ...opts, shell: false }
+  const realArgs = []
+  let script = cmd
+
+  // first, determine if we're in windows because if we are we need to know if we're
+  // running an .exe or a .cmd/.bat since the latter requires extra escaping
+  const isCmd = /(?:^|\\)cmd(?:\.exe)?$/i.test(command)
+  if (isCmd) {
+    let doubleEscape = false
+
+    // Decode the executable token so escaped batch shims still get double escaping.
+    let initialCmd = ''
+    let insideQuotes = false
+    for (let i = 0; i < cmd.length; ++i) {
+      const char = cmd.charAt(i)
+      if (char === '^' && !insideQuotes && i + 1 < cmd.length) {
+        initialCmd += cmd.charAt(++i)
+        continue
+      }
+      if (char === ' ' && !insideQuotes) {
+        break
+      }
+
+      initialCmd += char
+      if (char === '"') {
+        insideQuotes = !insideQuotes
+      }
+    }
+    if (initialCmd.startsWith('"') && initialCmd.endsWith('"')) {
+      initialCmd = initialCmd.slice(1, -1)
+    }
+
+    let pathToInitial
+    try {
+      pathToInitial = which.sync(initialCmd, {
+        path: (options.env && findInObject(options.env, 'PATH')) || process.env.PATH,
+        pathext: (options.env && findInObject(options.env, 'PATHEXT')) || process.env.PATHEXT,
+      }).toLowerCase()
+    } catch (err) {
+      pathToInitial = initialCmd.toLowerCase()
+    }
+
+    doubleEscape = pathToInitial.endsWith('.cmd') || pathToInitial.endsWith('.bat')
+    for (const arg of args) {
+      script += ` ${escape.cmd(arg, doubleEscape)}`
+    }
+    realArgs.push('/d', '/s', '/c', script)
+    options.windowsVerbatimArguments = true
+  } else {
+    for (const arg of args) {
+      script += ` ${escape.sh(arg)}`
+    }
+    realArgs.push('-c', script)
+  }
+
+  return promiseSpawn(command, realArgs, options, extra)
+}
+
+// open a file with the default application as defined by the user's OS
+const open = (_args, opts = {}, extra = {}) => {
+  const options = { ...opts, shell: true }
+  const args = [].concat(_args)
+
+  let platform = process.platform
+  // process.platform === 'linux' may actually indicate WSL, if that's the case
+  // open the argument with sensible-browser which is pre-installed
+  // In WSL, set the default browser using, for example,
+  // export BROWSER="/mnt/c/Program Files (x86)/Google/Chrome/Application/chrome.exe"
+  // or
+  // export BROWSER="/mnt/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe"
+  // To permanently set the default browser, add the appropriate entry to your shell's
+  // RC file, e.g. .bashrc or .zshrc.
+  if (platform === 'linux' && os.release().toLowerCase().includes('microsoft')) {
+    platform = 'wsl'
+    if (!process.env.BROWSER) {
+      return Promise.reject(
+        new Error('Set the BROWSER environment variable to your desired browser.'))
+    }
+  }
+
+  let command = options.command
+  if (!command) {
+    if (platform === 'win32') {
+      // spawnWithShell does not do the additional os.release() check, so we
+      // have to force the shell here to make sure we treat WSL as windows.
+      options.shell = process.env.ComSpec
+      // also, the start command accepts a title so to make sure that we don't
+      // accidentally interpret the first arg as the title, we stick an empty
+      // string immediately after the start command
+      command = 'start ""'
+    } else if (platform === 'wsl') {
+      command = 'sensible-browser'
+    } else if (platform === 'darwin') {
+      command = 'open'
+    } else {
+      command = 'xdg-open'
+    }
+  }
+
+  return spawnWithShell(command, args, options, extra)
+}
+promiseSpawn.open = open
+
+const isPipe = (stdio = 'pipe', fd) => {
+  if (stdio === 'pipe' || stdio === null) {
+    return true
+  }
+
+  if (Array.isArray(stdio)) {
+    return isPipe(stdio[fd], fd)
+  }
+
+  return false
+}
+
+const stdioResult = (stdout, stderr, { stdioString = true, stdio }) => {
+  const result = {
+    stdout: null,
+    stderr: null,
+  }
+
+  // stdio is [stdin, stdout, stderr]
+  if (isPipe(stdio, 1)) {
+    result.stdout = Buffer.concat(stdout)
+    if (stdioString) {
+      result.stdout = result.stdout.toString().trim()
+    }
+  }
+
+  if (isPipe(stdio, 2)) {
+    result.stderr = Buffer.concat(stderr)
+    if (stdioString) {
+      result.stderr = result.stderr.toString().trim()
+    }
+  }
+
+  return result
+}
+
+// case insensitive lookup in an object
+const findInObject = (obj, key) => {
+  key = key.toLowerCase()
+  for (const objKey of Object.keys(obj).sort()) {
+    if (objKey.toLowerCase() === key) {
+      return obj[objKey]
+    }
+  }
+}
+
+module.exports = promiseSpawn
+
+
+/***/ }),
+
+/***/ 24100:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+"use strict";
+
+
+const parseUrl = __nccwpck_require__(66605)
+
+// look for github shorthand inputs, such as npm/cli
+const isGitHubShorthand = (arg) => {
+  // it cannot contain whitespace before the first #
+  // it cannot start with a / because that's probably an absolute file path
+  // but it must include a slash since repos are username/repository
+  // it cannot start with a . because that's probably a relative file path
+  // it cannot start with an @ because that's a scoped package if it passes the other tests
+  // it cannot contain a : before a # because that tells us that there's a protocol
+  // a second / may not exist before a #
+  const firstHash = arg.indexOf('#')
+  const firstSlash = arg.indexOf('/')
+  const secondSlash = arg.indexOf('/', firstSlash + 1)
+  const firstColon = arg.indexOf(':')
+  const firstSpace = /\s/.exec(arg)
+  const firstAt = arg.indexOf('@')
+
+  const spaceOnlyAfterHash = !firstSpace || (firstHash > -1 && firstSpace.index > firstHash)
+  const atOnlyAfterHash = firstAt === -1 || (firstHash > -1 && firstAt > firstHash)
+  const colonOnlyAfterHash = firstColon === -1 || (firstHash > -1 && firstColon > firstHash)
+  const secondSlashOnlyAfterHash = secondSlash === -1 || (firstHash > -1 && secondSlash > firstHash)
+  const hasSlash = firstSlash > 0
+  // if a # is found, what we really want to know is that the character
+  // immediately before # is not a /
+  const doesNotEndWithSlash = firstHash > -1 ? arg[firstHash - 1] !== '/' : !arg.endsWith('/')
+  const doesNotStartWithDot = !arg.startsWith('.')
+
+  return spaceOnlyAfterHash && hasSlash && doesNotEndWithSlash &&
+    doesNotStartWithDot && atOnlyAfterHash && colonOnlyAfterHash &&
+    secondSlashOnlyAfterHash
+}
+
+module.exports = (giturl, opts, { gitHosts, protocols }) => {
+  if (!giturl) {
+    return
+  }
+
+  const correctedUrl = isGitHubShorthand(giturl) ? `github:${giturl}` : giturl
+  const parsed = parseUrl(correctedUrl, protocols)
+  if (!parsed) {
+    return
+  }
+
+  const gitHostShortcut = gitHosts.byShortcut[parsed.protocol]
+  const gitHostDomain = gitHosts.byDomain[parsed.hostname.startsWith('www.')
+    ? parsed.hostname.slice(4)
+    : parsed.hostname]
+  const gitHostName = gitHostShortcut || gitHostDomain
+  if (!gitHostName) {
+    return
+  }
+
+  const gitHostInfo = gitHosts[gitHostShortcut || gitHostDomain]
+  let auth = null
+  if (protocols[parsed.protocol]?.auth && (parsed.username || parsed.password)) {
+    auth = `${parsed.username}${parsed.password ? ':' + parsed.password : ''}`
+  }
+
+  let committish = null
+  let user = null
+  let project = null
+  let defaultRepresentation = null
+
+  try {
+    if (gitHostShortcut) {
+      let pathname = parsed.pathname.startsWith('/') ? parsed.pathname.slice(1) : parsed.pathname
+      const firstAt = pathname.indexOf('@')
+      // we ignore auth for shortcuts, so just trim it out
+      if (firstAt > -1) {
+        pathname = pathname.slice(firstAt + 1)
+      }
+
+      const lastSlash = pathname.lastIndexOf('/')
+      if (lastSlash > -1) {
+        user = decodeURIComponent(pathname.slice(0, lastSlash))
+        // we want nulls only, never empty strings
+        if (!user) {
+          user = null
+        }
+        project = decodeURIComponent(pathname.slice(lastSlash + 1))
+      } else {
+        project = decodeURIComponent(pathname)
+      }
+
+      if (project.endsWith('.git')) {
+        project = project.slice(0, -4)
+      }
+
+      if (parsed.hash) {
+        committish = decodeURIComponent(parsed.hash.slice(1))
+      }
+
+      defaultRepresentation = 'shortcut'
+    } else {
+      if (!gitHostInfo.protocols.includes(parsed.protocol)) {
+        return
+      }
+
+      const segments = gitHostInfo.extract(parsed)
+      if (!segments) {
+        return
+      }
+
+      user = segments.user && decodeURIComponent(segments.user)
+      project = decodeURIComponent(segments.project)
+      committish = decodeURIComponent(segments.committish)
+      defaultRepresentation = protocols[parsed.protocol]?.name || parsed.protocol.slice(0, -1)
+    }
+  } catch (err) {
+    /* istanbul ignore else */
+    if (err instanceof URIError) {
+      return
+    } else {
+      throw err
+    }
+  }
+
+  return [gitHostName, user, auth, project, committish, defaultRepresentation, opts]
+}
+
+
+/***/ }),
+
+/***/ 15045:
+/***/ ((module) => {
+
+"use strict";
+/* eslint-disable max-len */
+
+
+
+const maybeJoin = (...args) => args.every(arg => arg) ? args.join('') : ''
+const maybeEncode = (arg) => arg ? encodeURIComponent(arg) : ''
+const formatHashFragment = (f) => f.toLowerCase()
+  .replace(/^\W+/g, '') // strip leading non-characters
+  .replace(/(?<!\W)\W+$/, '') // strip trailing non-characters
+  .replace(/\//g, '') // strip all slashes
+  .replace(/\W+/g, '-') // replace remaining non-characters with '-'
+
+const defaults = {
+  sshtemplate: ({ domain, user, project, committish }) =>
+    `git@${domain}:${user}/${project}.git${maybeJoin('#', committish)}`,
+  sshurltemplate: ({ domain, user, project, committish }) =>
+    `git+ssh://git@${domain}/${user}/${project}.git${maybeJoin('#', committish)}`,
+  edittemplate: ({ domain, user, project, committish, editpath, path }) =>
+    `https://${domain}/${user}/${project}${maybeJoin('/', editpath, '/', maybeEncode(committish || 'HEAD'), '/', path)}`,
+  browsetemplate: ({ domain, user, project, committish, treepath }) =>
+    `https://${domain}/${user}/${project}${maybeJoin('/', treepath, '/', maybeEncode(committish))}`,
+  browsetreetemplate: ({ domain, user, project, committish, treepath, path, fragment, hashformat }) =>
+    `https://${domain}/${user}/${project}/${treepath}/${maybeEncode(committish || 'HEAD')}/${path}${maybeJoin('#', hashformat(fragment || ''))}`,
+  browseblobtemplate: ({ domain, user, project, committish, blobpath, path, fragment, hashformat }) =>
+    `https://${domain}/${user}/${project}/${blobpath}/${maybeEncode(committish || 'HEAD')}/${path}${maybeJoin('#', hashformat(fragment || ''))}`,
+  docstemplate: ({ domain, user, project, treepath, committish }) =>
+    `https://${domain}/${user}/${project}${maybeJoin('/', treepath, '/', maybeEncode(committish))}#readme`,
+  httpstemplate: ({ auth, domain, user, project, committish }) =>
+    `git+https://${maybeJoin(auth, '@')}${domain}/${user}/${project}.git${maybeJoin('#', committish)}`,
+  filetemplate: ({ domain, user, project, committish, path }) =>
+    `https://${domain}/${user}/${project}/raw/${maybeEncode(committish || 'HEAD')}/${path}`,
+  shortcuttemplate: ({ type, user, project, committish }) =>
+    `${type}:${user}/${project}${maybeJoin('#', committish)}`,
+  pathtemplate: ({ user, project, committish }) =>
+    `${user}/${project}${maybeJoin('#', committish)}`,
+  bugstemplate: ({ domain, user, project }) =>
+    `https://${domain}/${user}/${project}/issues`,
+  hashformat: formatHashFragment,
+}
+
+const hosts = {}
+hosts.github = {
+  // First two are insecure and generally shouldn't be used any more, but
+  // they are still supported.
+  protocols: ['git:', 'http:', 'git+ssh:', 'git+https:', 'ssh:', 'https:'],
+  domain: 'github.com',
+  treepath: 'tree',
+  blobpath: 'blob',
+  editpath: 'edit',
+  filetemplate: ({ auth, user, project, committish, path }) =>
+    `https://${maybeJoin(auth, '@')}raw.githubusercontent.com/${user}/${project}/${maybeEncode(committish || 'HEAD')}/${path}`,
+  gittemplate: ({ auth, domain, user, project, committish }) =>
+    `git://${maybeJoin(auth, '@')}${domain}/${user}/${project}.git${maybeJoin('#', committish)}`,
+  tarballtemplate: ({ domain, user, project, committish }) =>
+    `https://codeload.${domain}/${user}/${project}/tar.gz/${maybeEncode(committish || 'HEAD')}`,
+  extract: (url) => {
+    let [, user, project, type, committish] = url.pathname.split('/', 5)
+    if (type && type !== 'tree') {
+      return
+    }
+
+    if (!type) {
+      committish = url.hash.slice(1)
+    }
+
+    if (project && project.endsWith('.git')) {
+      project = project.slice(0, -4)
+    }
+
+    if (!user || !project) {
+      return
+    }
+
+    return { user, project, committish }
+  },
+}
+
+hosts.bitbucket = {
+  protocols: ['git+ssh:', 'git+https:', 'ssh:', 'https:'],
+  domain: 'bitbucket.org',
+  treepath: 'src',
+  blobpath: 'src',
+  editpath: '?mode=edit',
+  edittemplate: ({ domain, user, project, committish, treepath, path, editpath }) =>
+    `https://${domain}/${user}/${project}${maybeJoin('/', treepath, '/', maybeEncode(committish || 'HEAD'), '/', path, editpath)}`,
+  tarballtemplate: ({ domain, user, project, committish }) =>
+    `https://${domain}/${user}/${project}/get/${maybeEncode(committish || 'HEAD')}.tar.gz`,
+  extract: (url) => {
+    let [, user, project, aux] = url.pathname.split('/', 4)
+    if (['get'].includes(aux)) {
+      return
+    }
+
+    if (project && project.endsWith('.git')) {
+      project = project.slice(0, -4)
+    }
+
+    if (!user || !project) {
+      return
+    }
+
+    return { user, project, committish: url.hash.slice(1) }
+  },
+}
+
+hosts.gitlab = {
+  protocols: ['git+ssh:', 'git+https:', 'ssh:', 'https:'],
+  domain: 'gitlab.com',
+  treepath: 'tree',
+  blobpath: 'tree',
+  editpath: '-/edit',
+  tarballtemplate: ({ domain, user, project, committish }) =>
+    `https://${domain}/api/v4/projects/${maybeEncode(user + '/' + project)}/repository/archive.tar.gz?sha=${maybeEncode(committish || 'HEAD')}`,
+  extract: (url) => {
+    const path = url.pathname.slice(1)
+    if (path.includes('/-/') || path.includes('/archive.tar.gz')) {
+      return
+    }
+
+    const segments = path.split('/')
+    let project = segments.pop()
+    if (project.endsWith('.git')) {
+      project = project.slice(0, -4)
+    }
+
+    const user = segments.join('/')
+    if (!user || !project) {
+      return
+    }
+
+    return { user, project, committish: url.hash.slice(1) }
+  },
+}
+
+hosts.gist = {
+  protocols: ['git:', 'git+ssh:', 'git+https:', 'ssh:', 'https:'],
+  domain: 'gist.github.com',
+  editpath: 'edit',
+  sshtemplate: ({ domain, project, committish }) =>
+    `git@${domain}:${project}.git${maybeJoin('#', committish)}`,
+  sshurltemplate: ({ domain, project, committish }) =>
+    `git+ssh://git@${domain}/${project}.git${maybeJoin('#', committish)}`,
+  edittemplate: ({ domain, user, project, committish, editpath }) =>
+    `https://${domain}/${user}/${project}${maybeJoin('/', maybeEncode(committish))}/${editpath}`,
+  browsetemplate: ({ domain, project, committish }) =>
+    `https://${domain}/${project}${maybeJoin('/', maybeEncode(committish))}`,
+  browsetreetemplate: ({ domain, project, committish, path, hashformat }) =>
+    `https://${domain}/${project}${maybeJoin('/', maybeEncode(committish))}${maybeJoin('#', hashformat(path))}`,
+  browseblobtemplate: ({ domain, project, committish, path, hashformat }) =>
+    `https://${domain}/${project}${maybeJoin('/', maybeEncode(committish))}${maybeJoin('#', hashformat(path))}`,
+  docstemplate: ({ domain, project, committish }) =>
+    `https://${domain}/${project}${maybeJoin('/', maybeEncode(committish))}`,
+  httpstemplate: ({ domain, project, committish }) =>
+    `git+https://${domain}/${project}.git${maybeJoin('#', committish)}`,
+  filetemplate: ({ user, project, committish, path }) =>
+    `https://gist.githubusercontent.com/${user}/${project}/raw${maybeJoin('/', maybeEncode(committish))}/${path}`,
+  shortcuttemplate: ({ type, project, committish }) =>
+    `${type}:${project}${maybeJoin('#', committish)}`,
+  pathtemplate: ({ project, committish }) =>
+    `${project}${maybeJoin('#', committish)}`,
+  bugstemplate: ({ domain, project }) =>
+    `https://${domain}/${project}`,
+  gittemplate: ({ domain, project, committish }) =>
+    `git://${domain}/${project}.git${maybeJoin('#', committish)}`,
+  tarballtemplate: ({ project, committish }) =>
+    `https://codeload.github.com/gist/${project}/tar.gz/${maybeEncode(committish || 'HEAD')}`,
+  extract: (url) => {
+    let [, user, project, aux] = url.pathname.split('/', 4)
+    if (aux === 'raw') {
+      return
+    }
+
+    if (!project) {
+      if (!user) {
+        return
+      }
+
+      project = user
+      user = null
+    }
+
+    if (project.endsWith('.git')) {
+      project = project.slice(0, -4)
+    }
+
+    return { user, project, committish: url.hash.slice(1) }
+  },
+  hashformat: function (fragment) {
+    return fragment && 'file-' + formatHashFragment(fragment)
+  },
+}
+
+hosts.sourcehut = {
+  protocols: ['git+ssh:', 'https:'],
+  domain: 'git.sr.ht',
+  treepath: 'tree',
+  blobpath: 'tree',
+  filetemplate: ({ domain, user, project, committish, path }) =>
+    `https://${domain}/${user}/${project}/blob/${maybeEncode(committish) || 'HEAD'}/${path}`,
+  httpstemplate: ({ domain, user, project, committish }) =>
+    `https://${domain}/${user}/${project}${maybeJoin('#', committish)}`,
+  tarballtemplate: ({ domain, user, project, committish }) =>
+    `https://${domain}/${user}/${project}/archive/${maybeEncode(committish) || 'HEAD'}.tar.gz`,
+  bugstemplate: () => null,
+  extract: (url) => {
+    let [, user, project, aux] = url.pathname.split('/', 4)
+
+    // tarball url
+    if (['archive'].includes(aux)) {
+      return
+    }
+
+    if (project && project.endsWith('.git')) {
+      project = project.slice(0, -4)
+    }
+
+    if (!user || !project) {
+      return
+    }
+
+    return { user, project, committish: url.hash.slice(1) }
+  },
+}
+
+for (const [name, host] of Object.entries(hosts)) {
+  hosts[name] = Object.assign({}, defaults, host)
+}
+
+module.exports = hosts
+
+
+/***/ }),
+
+/***/ 25010:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+"use strict";
+
+
+const { LRUCache } = __nccwpck_require__(8416)
+const hosts = __nccwpck_require__(15045)
+const fromUrl = __nccwpck_require__(24100)
+const parseUrl = __nccwpck_require__(66605)
+
+const cache = new LRUCache({ max: 1000 })
+
+function unknownHostedUrl (url) {
+  try {
+    const {
+      protocol,
+      hostname,
+      pathname,
+    } = new URL(url)
+
+    if (!hostname) {
+      return null
+    }
+
+    const proto = /(?:git\+)http:$/.test(protocol) ? 'http:' : 'https:'
+    const path = pathname.replace(/\.git$/, '')
+    return `${proto}//${hostname}${path}`
+  } catch {
+    return null
+  }
+}
+
+class GitHost {
+  constructor (type, user, auth, project, committish, defaultRepresentation, opts = {}) {
+    Object.assign(this, GitHost.#gitHosts[type], {
+      type,
+      user,
+      auth,
+      project,
+      committish,
+      default: defaultRepresentation,
+      opts,
+    })
+  }
+
+  static #gitHosts = { byShortcut: {}, byDomain: {} }
+  static #protocols = {
+    'git+ssh:': { name: 'sshurl' },
+    'ssh:': { name: 'sshurl' },
+    'git+https:': { name: 'https', auth: true },
+    'git:': { auth: true },
+    'http:': { auth: true },
+    'https:': { auth: true },
+    'git+http:': { auth: true },
+  }
+
+  static addHost (name, host) {
+    GitHost.#gitHosts[name] = host
+    GitHost.#gitHosts.byDomain[host.domain] = name
+    GitHost.#gitHosts.byShortcut[`${name}:`] = name
+    GitHost.#protocols[`${name}:`] = { name }
+  }
+
+  static fromUrl (giturl, opts) {
+    if (typeof giturl !== 'string') {
+      return
+    }
+
+    const key = giturl + JSON.stringify(opts || {})
+
+    if (!cache.has(key)) {
+      const hostArgs = fromUrl(giturl, opts, {
+        gitHosts: GitHost.#gitHosts,
+        protocols: GitHost.#protocols,
+      })
+      cache.set(key, hostArgs ? new GitHost(...hostArgs) : undefined)
+    }
+
+    return cache.get(key)
+  }
+
+  static fromManifest (manifest, opts = {}) {
+    if (!manifest || typeof manifest !== 'object') {
+      return
+    }
+
+    const r = manifest.repository
+    // TODO: look into also checking the `bugs`/`homepage` URLs
+
+    const rurl = r && (
+      typeof r === 'string'
+        ? r
+        : typeof r === 'object' && typeof r.url === 'string'
+          ? r.url
+          : null
+    )
+
+    if (!rurl) {
+      throw new Error('no repository')
+    }
+
+    const info = (rurl && GitHost.fromUrl(rurl.replace(/^git\+/, ''), opts)) || null
+    if (info) {
+      return info
+    }
+    const unk = unknownHostedUrl(rurl)
+    return GitHost.fromUrl(unk, opts) || unk
+  }
+
+  static parseUrl (url) {
+    return parseUrl(url)
+  }
+
+  #fill (template, opts) {
+    if (typeof template !== 'function') {
+      return null
+    }
+
+    const options = { ...this, ...this.opts, ...opts }
+
+    // the path should always be set so we don't end up with 'undefined' in urls
+    if (!options.path) {
+      options.path = ''
+    }
+
+    // template functions will insert the leading slash themselves
+    if (options.path.startsWith('/')) {
+      options.path = options.path.slice(1)
+    }
+
+    if (options.noCommittish) {
+      options.committish = null
+    }
+
+    const result = template(options)
+    return options.noGitPlus && result.startsWith('git+') ? result.slice(4) : result
+  }
+
+  hash () {
+    return this.committish ? `#${this.committish}` : ''
+  }
+
+  ssh (opts) {
+    return this.#fill(this.sshtemplate, opts)
+  }
+
+  sshurl (opts) {
+    return this.#fill(this.sshurltemplate, opts)
+  }
+
+  browse (path, ...args) {
+    // not a string, treat path as opts
+    if (typeof path !== 'string') {
+      return this.#fill(this.browsetemplate, path)
+    }
+
+    if (typeof args[0] !== 'string') {
+      return this.#fill(this.browsetreetemplate, { ...args[0], path })
+    }
+
+    return this.#fill(this.browsetreetemplate, { ...args[1], fragment: args[0], path })
+  }
+
+  // If the path is known to be a file, then browseFile should be used. For some hosts
+  // the url is the same as browse, but for others like GitHub a file can use both `/tree/`
+  // and `/blob/` in the path. When using a default committish of `HEAD` then the `/tree/`
+  // path will redirect to a specific commit. Using the `/blob/` path avoids this and
+  // does not redirect to a different commit.
+  browseFile (path, ...args) {
+    if (typeof args[0] !== 'string') {
+      return this.#fill(this.browseblobtemplate, { ...args[0], path })
+    }
+
+    return this.#fill(this.browseblobtemplate, { ...args[1], fragment: args[0], path })
+  }
+
+  docs (opts) {
+    return this.#fill(this.docstemplate, opts)
+  }
+
+  bugs (opts) {
+    return this.#fill(this.bugstemplate, opts)
+  }
+
+  https (opts) {
+    return this.#fill(this.httpstemplate, opts)
+  }
+
+  git (opts) {
+    return this.#fill(this.gittemplate, opts)
+  }
+
+  shortcut (opts) {
+    return this.#fill(this.shortcuttemplate, opts)
+  }
+
+  path (opts) {
+    return this.#fill(this.pathtemplate, opts)
+  }
+
+  tarball (opts) {
+    return this.#fill(this.tarballtemplate, { ...opts, noCommittish: false })
+  }
+
+  file (path, opts) {
+    return this.#fill(this.filetemplate, { ...opts, path })
+  }
+
+  edit (path, opts) {
+    return this.#fill(this.edittemplate, { ...opts, path })
+  }
+
+  getDefaultRepresentation () {
+    return this.default
+  }
+
+  toString (opts) {
+    if (this.default && typeof this[this.default] === 'function') {
+      return this[this.default](opts)
+    }
+
+    return this.sshurl(opts)
+  }
+}
+
+for (const [name, host] of Object.entries(hosts)) {
+  GitHost.addHost(name, host)
+}
+
+module.exports = GitHost
+
+
+/***/ }),
+
+/***/ 66605:
+/***/ ((module) => {
+
+const lastIndexOfBefore = (str, char, beforeChar) => {
+  const startPosition = str.indexOf(beforeChar)
+  return str.lastIndexOf(char, startPosition > -1 ? startPosition : Infinity)
+}
+
+const safeUrl = (u) => {
+  try {
+    return new URL(u)
+  } catch {
+    // this fn should never throw
+  }
+}
+
+// accepts input like git:github.com:user/repo and inserts the // after the first :
+const correctProtocol = (arg, protocols) => {
+  const firstColon = arg.indexOf(':')
+  const proto = arg.slice(0, firstColon + 1)
+  if (Object.prototype.hasOwnProperty.call(protocols, proto)) {
+    return arg
+  }
+
+  if (arg.substr(firstColon, 3) === '://') {
+    // If arg is given as <foo>://<bar>, then this is already a valid URL.
+    return arg
+  }
+
+  const firstAt = arg.indexOf('@')
+  if (firstAt > -1) {
+    if (firstAt > firstColon) {
+      // URL has the form of <foo>:<bar>@<baz>. Assume this is a git+ssh URL.
+      return `git+ssh://${arg}`
+    } else {
+      // URL has the form 'git@github.com:npm/hosted-git-info.git'.
+      return arg
+    }
+  }
+
+  // Correct <foo>:<bar> to <foo>://<bar>
+  return `${arg.slice(0, firstColon + 1)}//${arg.slice(firstColon + 1)}`
+}
+
+// attempt to correct an scp style url so that it will parse with `new URL()`
+const correctUrl = (giturl) => {
+  // ignore @ that come after the first hash since the denotes the start
+  // of a committish which can contain @ characters
+  const firstAt = lastIndexOfBefore(giturl, '@', '#')
+  // ignore colons that come after the hash since that could include colons such as:
+  // git@github.com:user/package-2#semver:^1.0.0
+  const lastColonBeforeHash = lastIndexOfBefore(giturl, ':', '#')
+
+  if (lastColonBeforeHash > firstAt) {
+    // the last : comes after the first @ (or there is no @)
+    // like it would in:
+    // proto://hostname.com:user/repo
+    // username@hostname.com:user/repo
+    // :password@hostname.com:user/repo
+    // username:password@hostname.com:user/repo
+    // proto://username@hostname.com:user/repo
+    // proto://:password@hostname.com:user/repo
+    // proto://username:password@hostname.com:user/repo
+    // then we replace the last : with a / to create a valid path
+    giturl = giturl.slice(0, lastColonBeforeHash) + '/' + giturl.slice(lastColonBeforeHash + 1)
+  }
+
+  if (lastIndexOfBefore(giturl, ':', '#') === -1 && giturl.indexOf('//') === -1) {
+    // we have no : at all
+    // as it would be in:
+    // username@hostname.com/user/repo
+    // then we prepend a protocol
+    giturl = `git+ssh://${giturl}`
+  }
+
+  return giturl
+}
+
+module.exports = (giturl, protocols) => {
+  const withProtocol = protocols ? correctProtocol(giturl, protocols) : giturl
+  return safeUrl(withProtocol) || safeUrl(correctUrl(withProtocol))
+}
+
+
+/***/ }),
+
+/***/ 48171:
+/***/ ((module) => {
+
+const { hasOwnProperty } = Object.prototype
+
+const encode = (obj, opt = {}) => {
+  if (typeof opt === 'string') {
+    opt = { section: opt }
+  }
+  opt.align = opt.align === true
+  opt.newline = opt.newline === true
+  opt.sort = opt.sort === true
+  opt.whitespace = opt.whitespace === true || opt.align === true
+  // The `typeof` check is required because accessing the `process` directly fails on browsers.
+  /* istanbul ignore next */
+  opt.platform = opt.platform || (typeof process !== 'undefined' && process.platform)
+  opt.bracketedArray = opt.bracketedArray !== false
+
+  /* istanbul ignore next */
+  const eol = opt.platform === 'win32' ? '\r\n' : '\n'
+  const separator = opt.whitespace ? ' = ' : '='
+  const children = []
+
+  const keys = opt.sort ? Object.keys(obj).sort() : Object.keys(obj)
+
+  let padToChars = 0
+  // If aligning on the separator, then padToChars is determined as follows:
+  // 1. Get the keys
+  // 2. Exclude keys pointing to objects unless the value is null or an array
+  // 3. Add `[]` to array keys
+  // 4. Ensure non empty set of keys
+  // 5. Reduce the set to the longest `safe` key
+  // 6. Get the `safe` length
+  if (opt.align) {
+    padToChars = safe(
+      (
+        keys
+          .filter(k => obj[k] === null || Array.isArray(obj[k]) || typeof obj[k] !== 'object')
+          .map(k => Array.isArray(obj[k]) ? `${k}[]` : k)
+      )
+        .concat([''])
+        .reduce((a, b) => safe(a).length >= safe(b).length ? a : b)
+    ).length
+  }
+
+  let out = ''
+  const arraySuffix = opt.bracketedArray ? '[]' : ''
+
+  for (const k of keys) {
+    const val = obj[k]
+    if (val && Array.isArray(val)) {
+      for (const item of val) {
+        out += safe(`${k}${arraySuffix}`).padEnd(padToChars, ' ') + separator + safe(item) + eol
+      }
+    } else if (val && typeof val === 'object') {
+      children.push(k)
+    } else {
+      out += safe(k).padEnd(padToChars, ' ') + separator + safe(val) + eol
+    }
+  }
+
+  if (opt.section && out.length) {
+    out = '[' + safe(opt.section) + ']' + (opt.newline ? eol + eol : eol) + out
+  }
+
+  for (const k of children) {
+    const nk = splitSections(k, '.').join('\\.')
+    const section = (opt.section ? opt.section + '.' : '') + nk
+    const child = encode(obj[k], {
+      ...opt,
+      section,
+    })
+    if (out.length && child.length) {
+      out += eol
+    }
+
+    out += child
+  }
+
+  return out
+}
+
+function splitSections (str, separator) {
+  var lastMatchIndex = 0
+  var lastSeparatorIndex = 0
+  var nextIndex = 0
+  var sections = []
+
+  do {
+    nextIndex = str.indexOf(separator, lastMatchIndex)
+
+    if (nextIndex !== -1) {
+      lastMatchIndex = nextIndex + separator.length
+
+      if (nextIndex > 0 && str[nextIndex - 1] === '\\') {
+        continue
+      }
+
+      sections.push(str.slice(lastSeparatorIndex, nextIndex))
+      lastSeparatorIndex = nextIndex + separator.length
+    }
+  } while (nextIndex !== -1)
+
+  sections.push(str.slice(lastSeparatorIndex))
+
+  return sections
+}
+
+const decode = (str, opt = {}) => {
+  opt.bracketedArray = opt.bracketedArray !== false
+  const out = Object.create(null)
+  let p = out
+  let section = null
+  //          section          |key      = value
+  const re = /^\[([^\]]*)\]\s*$|^([^=]+)(=(.*))?$/i
+  const lines = str.split(/[\r\n]+/g)
+  const duplicates = {}
+
+  for (const line of lines) {
+    if (!line || line.match(/^\s*[;#]/) || line.match(/^\s*$/)) {
+      continue
+    }
+    const match = line.match(re)
+    if (!match) {
+      continue
+    }
+    if (match[1] !== undefined) {
+      section = unsafe(match[1])
+      if (section === '__proto__') {
+        // not allowed
+        // keep parsing the section, but don't attach it.
+        p = Object.create(null)
+        continue
+      }
+      p = out[section] = out[section] || Object.create(null)
+      continue
+    }
+    const keyRaw = unsafe(match[2])
+    let isArray
+    if (opt.bracketedArray) {
+      isArray = keyRaw.length > 2 && keyRaw.slice(-2) === '[]'
+    } else {
+      duplicates[keyRaw] = (duplicates?.[keyRaw] || 0) + 1
+      isArray = duplicates[keyRaw] > 1
+    }
+    const key = isArray && keyRaw.endsWith('[]')
+      ? keyRaw.slice(0, -2) : keyRaw
+
+    if (key === '__proto__') {
+      continue
+    }
+    const valueRaw = match[3] ? unsafe(match[4]) : true
+    const value = valueRaw === 'true' ||
+      valueRaw === 'false' ||
+      valueRaw === 'null' ? JSON.parse(valueRaw)
+      : valueRaw
+
+    // Convert keys with '[]' suffix to an array
+    if (isArray) {
+      if (!hasOwnProperty.call(p, key)) {
+        p[key] = []
+      } else if (!Array.isArray(p[key])) {
+        p[key] = [p[key]]
+      }
+    }
+
+    // safeguard against resetting a previously defined
+    // array by accidentally forgetting the brackets
+    if (Array.isArray(p[key])) {
+      p[key].push(value)
+    } else {
+      p[key] = value
+    }
+  }
+
+  // {a:{y:1},"a.b":{x:2}} --> {a:{y:1,b:{x:2}}}
+  // use a filter to return the keys that have to be deleted.
+  const remove = []
+  for (const k of Object.keys(out)) {
+    if (!hasOwnProperty.call(out, k) ||
+      typeof out[k] !== 'object' ||
+      Array.isArray(out[k])) {
+      continue
+    }
+
+    // see if the parent section is also an object.
+    // if so, add it to that, and mark this one for deletion
+    const parts = splitSections(k, '.')
+    p = out
+    const l = parts.pop()
+    const nl = l.replace(/\\\./g, '.')
+    for (const part of parts) {
+      if (part === '__proto__') {
+        continue
+      }
+      if (!hasOwnProperty.call(p, part) || typeof p[part] !== 'object') {
+        p[part] = Object.create(null)
+      }
+      p = p[part]
+    }
+    if (p === out && nl === l) {
+      continue
+    }
+
+    p[nl] = out[k]
+    remove.push(k)
+  }
+  for (const del of remove) {
+    delete out[del]
+  }
+
+  return out
+}
+
+const isQuoted = val => {
+  return (val.startsWith('"') && val.endsWith('"')) ||
+    (val.startsWith("'") && val.endsWith("'"))
+}
+
+const safe = val => {
+  if (
+    typeof val !== 'string' ||
+    val.match(/[=\r\n]/) ||
+    val.match(/^\[/) ||
+    (val.length > 1 && isQuoted(val)) ||
+    val !== val.trim()
+  ) {
+    return JSON.stringify(val)
+  }
+  return val.split(';').join('\\;').split('#').join('\\#')
+}
+
+const unsafe = val => {
+  val = (val || '').trim()
+  if (isQuoted(val)) {
+    // remove the single quotes before calling JSON.parse
+    if (val.charAt(0) === "'") {
+      val = val.slice(1, -1)
+    }
+    try {
+      val = JSON.parse(val)
+    } catch {
+      // ignore errors
+    }
+  } else {
+    // walk the val to find the first not-escaped ; character
+    let esc = false
+    let unesc = ''
+    for (let i = 0, l = val.length; i < l; i++) {
+      const c = val.charAt(i)
+      if (esc) {
+        if ('\\;#'.indexOf(c) !== -1) {
+          unesc += c
+        } else {
+          unesc += '\\' + c
+        }
+
+        esc = false
+      } else if (';#'.indexOf(c) !== -1) {
+        break
+      } else if (c === '\\') {
+        esc = true
+      } else {
+        unesc += c
+      }
+    }
+    if (esc) {
+      unesc += '\\'
+    }
+
+    return unesc.trim()
+  }
+  return val
+}
+
+module.exports = {
+  parse: decode,
+  decode,
+  stringify: encode,
+  encode,
+  safe,
+  unsafe,
+}
+
+
+/***/ }),
+
+/***/ 77223:
+/***/ ((module) => {
+
+"use strict";
+
+
+const INDENT = Symbol.for('indent')
+const NEWLINE = Symbol.for('newline')
+
+const DEFAULT_NEWLINE = '\n'
+const DEFAULT_INDENT = '  '
+const BOM = /^\uFEFF/
+
+// only respect indentation if we got a line break, otherwise squash it
+// things other than objects and arrays aren't indented, so ignore those
+// Important: in both of these regexps, the $1 capture group is the newline
+// or undefined, and the $2 capture group is the indent, or undefined.
+const FORMAT = /^\s*[{[]((?:\r?\n)+)([\s\t]*)/
+const EMPTY = /^(?:\{\}|\[\])((?:\r?\n)+)?$/
+
+// Node 20 puts single quotes around the token and a comma after it
+const UNEXPECTED_TOKEN = /^Unexpected token '?(.)'?(,)? /i
+
+const hexify = (char) => {
+  const h = char.charCodeAt(0).toString(16).toUpperCase()
+  return `0x${h.length % 2 ? '0' : ''}${h}`
+}
+
+// Remove byte order marker. This catches EF BB BF (the UTF-8 BOM)
+// because the buffer-to-string conversion in `fs.readFileSync()`
+// translates it to FEFF, the UTF-16 BOM.
+const stripBOM = (txt) => String(txt).replace(BOM, '')
+
+const makeParsedError = (msg, parsing, position = 0) => ({
+  message: `${msg} while parsing ${parsing}`,
+  position,
+})
+
+const parseError = (e, txt, context = 20) => {
+  let msg = e.message
+
+  if (!txt) {
+    return makeParsedError(msg, 'empty string')
+  }
+
+  const badTokenMatch = msg.match(UNEXPECTED_TOKEN)
+  const badIndexMatch = msg.match(/ position\s+(\d+)/i)
+
+  if (badTokenMatch) {
+    msg = msg.replace(
+      UNEXPECTED_TOKEN,
+      `Unexpected token ${JSON.stringify(badTokenMatch[1])} (${hexify(badTokenMatch[1])})$2 `
+    )
+  }
+
+  let errIdx
+  if (badIndexMatch) {
+    errIdx = +badIndexMatch[1]
+  } else /* node:coverage disable */ if (
+    // doesn't happen in Node 22+
+    msg.match(/^Unexpected end of JSON.*/i)
+  ) {
+    errIdx = txt.length - 1
+  }
+  /* node:coverage enable */
+
+  if (errIdx == null) {
+    return makeParsedError(msg, `'${txt.slice(0, context * 2)}'`)
+  }
+
+  const start = errIdx <= context ? 0 : errIdx - context
+  const end = errIdx + context >= txt.length ? txt.length : errIdx + context
+  const slice = `${start ? '...' : ''}${txt.slice(start, end)}${end === txt.length ? '' : '...'}`
+
+  return makeParsedError(
+    msg,
+    `${txt === slice ? '' : 'near '}${JSON.stringify(slice)}`,
+    errIdx
+  )
+}
+
+class JSONParseError extends SyntaxError {
+  constructor (er, txt, context, caller) {
+    const metadata = parseError(er, txt, context)
+    super(metadata.message)
+    Object.assign(this, metadata)
+    this.code = 'EJSONPARSE'
+    this.systemError = er
+    Error.captureStackTrace(this, caller || this.constructor)
+  }
+
+  get name () {
+    return this.constructor.name
+  }
+
+  set name (n) {}
+
+  get [Symbol.toStringTag] () {
+    return this.constructor.name
+  }
+}
+
+const parseJson = (txt, reviver) => {
+  const result = JSON.parse(txt, reviver)
+  if (result && typeof result === 'object') {
+    // get the indentation so that we can save it back nicely
+    // if the file starts with {" then we have an indent of '', ie, none
+    // otherwise, pick the indentation of the next line after the first \n If the
+    // pattern doesn't match, then it means no indentation. JSON.stringify ignores
+    // symbols, so this is reasonably safe. if the string is '{}' or '[]', then
+    // use the default 2-space indent.
+    const match = txt.match(EMPTY) || txt.match(FORMAT) || [null, '', '']
+    result[NEWLINE] = match[1] ?? DEFAULT_NEWLINE
+    result[INDENT] = match[2] ?? DEFAULT_INDENT
+  }
+  return result
+}
+
+const parseJsonError = (raw, reviver, context) => {
+  const txt = stripBOM(raw)
+  try {
+    return parseJson(txt, reviver)
+  } catch (e) {
+    if (typeof raw !== 'string' && !Buffer.isBuffer(raw)) {
+      const msg = Array.isArray(raw) && raw.length === 0 ? 'an empty array' : String(raw)
+      throw Object.assign(
+        new TypeError(`Cannot parse ${msg}`),
+        { code: 'EJSONPARSE', systemError: e }
+      )
+    }
+    throw new JSONParseError(e, txt, context, parseJsonError)
+  }
+}
+
+module.exports = parseJsonError
+parseJsonError.JSONParseError = JSONParseError
+parseJsonError.noExceptions = (raw, reviver) => {
+  try {
+    return parseJson(stripBOM(raw), reviver)
+  } catch {
+    // no exceptions
+  }
+}
+
+
+/***/ }),
+
+/***/ 47753:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const process = __nccwpck_require__(1708)
+const nodeOs = __nccwpck_require__(48161)
+const fs = __nccwpck_require__(73024)
+
+function isMusl (file) {
+  return file.includes('libc.musl-') || file.includes('ld-musl-')
+}
+
+function os () {
+  return process.platform
+}
+
+function cpu () {
+  return process.arch
+}
+
+const LDD_PATH = '/usr/bin/ldd'
+function getFamilyFromFilesystem () {
+  try {
+    const content = fs.readFileSync(LDD_PATH, 'utf-8')
+    if (content.includes('musl')) {
+      return 'musl'
+    }
+    if (content.includes('GNU C Library')) {
+      return 'glibc'
+    }
+    return null
+  } catch {
+    return undefined
+  }
+}
+
+function getFamilyFromReport () {
+  const originalExclude = process.report.excludeNetwork
+  process.report.excludeNetwork = true
+  const report = process.report.getReport()
+  process.report.excludeNetwork = originalExclude
+  if (report.header?.glibcVersionRuntime) {
+    family = 'glibc'
+  } else if (Array.isArray(report.sharedObjects) && report.sharedObjects.some(isMusl)) {
+    family = 'musl'
+  } else {
+    family = null
+  }
+  return family
+}
+
+let family
+function libc (osName) {
+  if (osName !== 'linux') {
+    return undefined
+  }
+  if (family === undefined) {
+    family = getFamilyFromFilesystem()
+    if (family === undefined) {
+      family = getFamilyFromReport()
+    }
+  }
+  return family
+}
+
+function devEngines (env = {}) {
+  const osName = env.os || os()
+  return {
+    cpu: {
+      name: env.cpu || cpu(),
+    },
+    libc: {
+      name: env.libc || libc(osName),
+    },
+    os: {
+      name: osName,
+      version: env.osVersion || nodeOs.release(),
+    },
+    packageManager: {
+      name: 'npm',
+      version: env.npmVersion,
+    },
+    runtime: {
+      name: 'node',
+      version: env.nodeVersion || process.version,
+    },
+  }
+}
+
+module.exports = {
+  cpu,
+  libc,
+  os,
+  devEngines,
+}
+
+
+/***/ }),
+
+/***/ 9567:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const satisfies = __nccwpck_require__(68011)
+const validRange = __nccwpck_require__(64737)
+
+const recognizedOnFail = [
+  'ignore',
+  'warn',
+  'error',
+  'download',
+]
+
+const recognizedProperties = [
+  'name',
+  'version',
+  'onFail',
+]
+
+const recognizedEngines = [
+  'packageManager',
+  'runtime',
+  'cpu',
+  'libc',
+  'os',
+]
+
+/** checks a devEngine dependency */
+function checkDependency (wanted, current, opts) {
+  const { engine } = opts
+
+  if ((typeof wanted !== 'object' || wanted === null) || Array.isArray(wanted)) {
+    throw new Error(`Invalid non-object value for "${engine}"`)
+  }
+
+  const properties = Object.keys(wanted)
+
+  for (const prop of properties) {
+    if (!recognizedProperties.includes(prop)) {
+      throw new Error(`Invalid property "${prop}" for "${engine}"`)
+    }
+  }
+
+  if (!properties.includes('name')) {
+    throw new Error(`Missing "name" property for "${engine}"`)
+  }
+
+  if (typeof wanted.name !== 'string') {
+    throw new Error(`Invalid non-string value for "name" within "${engine}"`)
+  }
+
+  if (typeof current.name !== 'string' || current.name === '') {
+    throw new Error(`Unable to determine "name" for "${engine}"`)
+  }
+
+  if (properties.includes('onFail')) {
+    if (typeof wanted.onFail !== 'string') {
+      throw new Error(`Invalid non-string value for "onFail" within "${engine}"`)
+    }
+    if (!recognizedOnFail.includes(wanted.onFail)) {
+      throw new Error(`Invalid onFail value "${wanted.onFail}" for "${engine}"`)
+    }
+  }
+
+  if (wanted.name !== current.name) {
+    return new Error(
+      `Invalid name "${wanted.name}" does not match "${current.name}" for "${engine}"`
+    )
+  }
+
+  if (properties.includes('version')) {
+    if (typeof wanted.version !== 'string') {
+      throw new Error(`Invalid non-string value for "version" within "${engine}"`)
+    }
+    if (typeof current.version !== 'string' || current.version === '') {
+      throw new Error(`Unable to determine "version" for "${engine}" "${wanted.name}"`)
+    }
+    if (validRange(wanted.version)) {
+      if (!satisfies(current.version, wanted.version, opts.semver)) {
+        return new Error(
+          // eslint-disable-next-line max-len
+          `Invalid semver version "${wanted.version}" does not match "${current.version}" for "${engine}"`
+        )
+      }
+    } else if (wanted.version !== current.version) {
+      return new Error(
+        `Invalid version "${wanted.version}" does not match "${current.version}" for "${engine}"`
+      )
+    }
+  }
+}
+
+/** checks devEngines package property and returns array of warnings / errors */
+function checkDevEngines (wanted, current = {}, opts = {}) {
+  if ((typeof wanted !== 'object' || wanted === null) || Array.isArray(wanted)) {
+    throw new Error(`Invalid non-object value for "devEngines"`)
+  }
+
+  const errors = []
+
+  for (const engine of Object.keys(wanted)) {
+    if (!recognizedEngines.includes(engine)) {
+      throw new Error(`Invalid property "devEngines.${engine}"`)
+    }
+    const dependencyAsAuthored = wanted[engine]
+    const dependencies = [dependencyAsAuthored].flat()
+    const currentEngine = current[engine] || {}
+
+    // this accounts for empty array eg { runtime: [] } and ignores it
+    if (dependencies.length === 0) {
+      continue
+    }
+
+    const depErrors = []
+    for (const dep of dependencies) {
+      const result = checkDependency(dep, currentEngine, { ...opts, engine })
+      if (result) {
+        depErrors.push(result)
+      }
+    }
+
+    const invalid = depErrors.length === dependencies.length
+
+    if (invalid) {
+      const lastDependency = dependencies[dependencies.length - 1]
+      let onFail = lastDependency.onFail || 'error'
+      if (onFail === 'download') {
+        onFail = 'error'
+      }
+
+      const err = Object.assign(new Error(`Invalid devEngines.${engine}`), {
+        errors: depErrors,
+        engine,
+        isWarn: onFail === 'warn',
+        isError: onFail === 'error',
+        current: currentEngine,
+        required: dependencyAsAuthored,
+      })
+
+      errors.push(err)
+    }
+  }
+  return errors
+}
+
+module.exports = {
+  checkDevEngines,
+}
+
+
+/***/ }),
+
+/***/ 66082:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const semver = __nccwpck_require__(62088)
+const currentEnv = __nccwpck_require__(47753)
+const { checkDevEngines } = __nccwpck_require__(9567)
+
+const checkEngine = (target, npmVer, nodeVer, force = false) => {
+  const nodev = force ? null : nodeVer
+  const eng = target.engines
+  const opt = { includePrerelease: true }
+  if (!eng) {
+    return
+  }
+
+  const nodeFail = nodev && eng.node && !semver.satisfies(nodev, eng.node, opt)
+  const npmFail = npmVer && eng.npm && !semver.satisfies(npmVer, eng.npm, opt)
+  if (nodeFail || npmFail) {
+    throw Object.assign(new Error('Unsupported engine'), {
+      pkgid: target._id,
+      current: { node: nodeVer, npm: npmVer },
+      required: eng,
+      code: 'EBADENGINE',
+    })
+  }
+}
+
+const checkPlatform = (target, force = false, environment = {}) => {
+  if (force) {
+    return
+  }
+
+  const os = environment.os || currentEnv.os()
+  const cpu = environment.cpu || currentEnv.cpu()
+  const libc = environment.libc || currentEnv.libc(os)
+
+  const osOk = target.os ? checkList(os, target.os) : true
+  const cpuOk = target.cpu ? checkList(cpu, target.cpu) : true
+  let libcOk = target.libc ? checkList(libc, target.libc) : true
+  if (target.libc && !libc) {
+    libcOk = false
+  }
+
+  if (!osOk || !cpuOk || !libcOk) {
+    throw Object.assign(new Error('Unsupported platform'), {
+      pkgid: target._id,
+      current: {
+        os,
+        cpu,
+        libc,
+      },
+      required: {
+        os: target.os,
+        cpu: target.cpu,
+        libc: target.libc,
+      },
+      code: 'EBADPLATFORM',
+    })
+  }
+}
+
+const checkList = (value, list) => {
+  if (typeof list === 'string') {
+    list = [list]
+  }
+  if (list.length === 1 && list[0] === 'any') {
+    return true
+  }
+  // match none of the negated values, and at least one of the
+  // non-negated values, if any are present.
+  let negated = 0
+  let match = false
+  for (const entry of list) {
+    const negate = entry.charAt(0) === '!'
+    const test = negate ? entry.slice(1) : entry
+    if (negate) {
+      negated++
+      if (value === test) {
+        return false
+      }
+    } else {
+      match = match || value === test
+    }
+  }
+  return match || negated === list.length
+}
+
+module.exports = {
+  checkEngine,
+  checkPlatform,
+  checkDevEngines,
+  currentEnv,
+}
+
+
+/***/ }),
+
+/***/ 83841:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+// pass in a manifest with a 'bin' field here, and it'll turn it
+// into a properly santized bin object
+const { join, basename } = __nccwpck_require__(16928)
+
+const normalize = pkg =>
+  !pkg.bin ? removeBin(pkg)
+  : typeof pkg.bin === 'string' ? normalizeString(pkg)
+  : Array.isArray(pkg.bin) ? normalizeArray(pkg)
+  : typeof pkg.bin === 'object' ? normalizeObject(pkg)
+  : removeBin(pkg)
+
+const normalizeString = pkg => {
+  if (!pkg.name) {
+    return removeBin(pkg)
+  }
+  pkg.bin = { [pkg.name]: pkg.bin }
+  return normalizeObject(pkg)
+}
+
+const normalizeArray = pkg => {
+  pkg.bin = pkg.bin.reduce((acc, k) => {
+    acc[basename(k)] = k
+    return acc
+  }, {})
+  return normalizeObject(pkg)
+}
+
+const removeBin = pkg => {
+  delete pkg.bin
+  return pkg
+}
+
+const normalizeObject = pkg => {
+  const orig = pkg.bin
+  const clean = {}
+  let hasBins = false
+  Object.keys(orig).forEach(binKey => {
+    const base = join('/', basename(binKey.replace(/\\|:/g, '/'))).slice(1)
+
+    if (typeof orig[binKey] !== 'string' || !base) {
+      return
+    }
+
+    const binTarget = join('/', orig[binKey].replace(/\\/g, '/'))
+      .replace(/\\/g, '/').slice(1)
+
+    if (!binTarget) {
+      return
+    }
+
+    clean[base] = binTarget
+    hasBins = true
+  })
+
+  if (hasBins) {
+    pkg.bin = clean
+  } else {
+    delete pkg.bin
+  }
+
+  return pkg
+}
+
+module.exports = normalize
+
+
+/***/ }),
+
+/***/ 49135:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+"use strict";
+
+
+const isWindows = process.platform === 'win32'
+
+const { URL } = __nccwpck_require__(73136)
+// We need to use path/win32 so that we get consistent results in tests, but this also means we need to manually convert backslashes to forward slashes when generating file: urls with paths.
+const path = isWindows ? __nccwpck_require__(58152) : __nccwpck_require__(76760)
+const { homedir } = __nccwpck_require__(48161)
+const HostedGit = __nccwpck_require__(25010)
+const semver = __nccwpck_require__(62088)
+const validatePackageName = __nccwpck_require__(83234)
+const { log } = __nccwpck_require__(89818)
+
+const hasSlashes = isWindows ? /\\|[/]/ : /[/]/
+const isURL = /^(?:git[+])?[a-z]+:/i
+const isGit = /^[^@]+@[^:.]+\.[^:]+:.+$/i
+const isFileType = /[.](?:tgz|tar\.gz|tar)$/i
+const isPortNumber = /:[0-9]+(\/|$)/i
+const isWindowsFile = /^(?:[.]|~[/]|[/\\]|[a-zA-Z]:)/
+const isPosixFile = /^(?:[.]|~[/]|[/]|[a-zA-Z]:)/
+const defaultRegistry = 'https://registry.npmjs.org'
+
+function npa (arg, where) {
+  let name
+  let spec
+  if (typeof arg === 'object') {
+    if (arg instanceof Result && (!where || where === arg.where)) {
+      return arg
+    } else if (arg.name && arg.rawSpec) {
+      return npa.resolve(arg.name, arg.rawSpec, where || arg.where)
+    } else {
+      return npa(arg.raw, where || arg.where)
+    }
+  }
+  const nameEndsAt = arg.indexOf('@', 1) // Skip possible leading @
+  const namePart = nameEndsAt > 0 ? arg.slice(0, nameEndsAt) : arg
+  if (isURL.test(arg)) {
+    spec = arg
+  } else if (isGit.test(arg)) {
+    spec = `git+ssh://${arg}`
+  // eslint-disable-next-line max-len
+  } else if (!namePart.startsWith('@') && (hasSlashes.test(namePart) || isFileType.test(namePart))) {
+    spec = arg
+  } else if (nameEndsAt > 0) {
+    name = namePart
+    spec = arg.slice(nameEndsAt + 1) || '*'
+  } else {
+    const valid = validatePackageName(arg)
+    if (valid.validForOldPackages) {
+      name = arg
+      spec = '*'
+    } else {
+      spec = arg
+    }
+  }
+  return resolve(name, spec, where, arg)
+}
+
+function isFileSpec (spec) {
+  if (!spec) {
+    return false
+  }
+  if (spec.toLowerCase().startsWith('file:')) {
+    return true
+  }
+  if (isWindows) {
+    return isWindowsFile.test(spec)
+  }
+  return isPosixFile.test(spec)
+}
+
+function isAliasSpec (spec) {
+  if (!spec) {
+    return false
+  }
+  return spec.toLowerCase().startsWith('npm:')
+}
+
+function resolve (name, spec, where, arg) {
+  const res = new Result({
+    raw: arg,
+    name: name,
+    rawSpec: spec,
+    fromArgument: arg != null,
+  })
+
+  if (name) {
+    res.name = name
+  }
+
+  if (!where) {
+    where = process.cwd()
+  }
+
+  if (isFileSpec(spec)) {
+    return fromFile(res, where)
+  } else if (isAliasSpec(spec)) {
+    return fromAlias(res, where)
+  }
+
+  const hosted = HostedGit.fromUrl(spec, {
+    noGitPlus: true,
+    noCommittish: true,
+  })
+  if (hosted) {
+    return fromHostedGit(res, hosted)
+  } else if (spec && isURL.test(spec)) {
+    return fromURL(res)
+  } else if (spec && (hasSlashes.test(spec) || isFileType.test(spec))) {
+    return fromFile(res, where)
+  } else {
+    return fromRegistry(res)
+  }
+}
+
+function toPurl (arg, reg = defaultRegistry) {
+  const res = npa(arg)
+
+  if (res.type !== 'version') {
+    throw invalidPurlType(res.type, res.raw)
+  }
+
+  // URI-encode leading @ of scoped packages
+  let purl = 'pkg:npm/' + res.name.replace(/^@/, '%40') + '@' + res.rawSpec
+  if (reg !== defaultRegistry) {
+    purl += '?repository_url=' + reg
+  }
+
+  return purl
+}
+
+function invalidPackageName (name, valid, raw) {
+  // eslint-disable-next-line max-len
+  const err = new Error(`Invalid package name "${name}" of package "${raw}": ${valid.errors.join('; ')}.`)
+  err.code = 'EINVALIDPACKAGENAME'
+  return err
+}
+
+function invalidTagName (name, raw) {
+  // eslint-disable-next-line max-len
+  const err = new Error(`Invalid tag name "${name}" of package "${raw}": Tags may not have any characters that encodeURIComponent encodes.`)
+  err.code = 'EINVALIDTAGNAME'
+  return err
+}
+
+function invalidPurlType (type, raw) {
+  // eslint-disable-next-line max-len
+  const err = new Error(`Invalid type "${type}" of package "${raw}": Purl can only be generated for "version" types.`)
+  err.code = 'EINVALIDPURLTYPE'
+  return err
+}
+
+class Result {
+  constructor (opts) {
+    this.type = opts.type
+    this.registry = opts.registry
+    this.where = opts.where
+    if (opts.raw == null) {
+      this.raw = opts.name ? `${opts.name}@${opts.rawSpec}` : opts.rawSpec
+    } else {
+      this.raw = opts.raw
+    }
+    this.name = undefined
+    this.escapedName = undefined
+    this.scope = undefined
+    this.rawSpec = opts.rawSpec || ''
+    this.saveSpec = opts.saveSpec
+    this.fetchSpec = opts.fetchSpec
+    if (opts.name) {
+      this.setName(opts.name)
+    }
+    this.gitRange = opts.gitRange
+    this.gitCommittish = opts.gitCommittish
+    this.gitSubdir = opts.gitSubdir
+    this.hosted = opts.hosted
+  }
+
+  // TODO move this to a getter/setter in a semver major
+  setName (name) {
+    const valid = validatePackageName(name)
+    if (!valid.validForOldPackages) {
+      throw invalidPackageName(name, valid, this.raw)
+    }
+
+    this.name = name
+    this.scope = name[0] === '@' ? name.slice(0, name.indexOf('/')) : undefined
+    // scoped packages in couch must have slash url-encoded, e.g. @foo%2Fbar
+    this.escapedName = name.replace('/', '%2f')
+    return this
+  }
+
+  toString () {
+    const full = []
+    if (this.name != null && this.name !== '') {
+      full.push(this.name)
+    }
+    const spec = this.saveSpec || this.fetchSpec || this.rawSpec
+    if (spec != null && spec !== '') {
+      full.push(spec)
+    }
+    return full.length ? full.join('@') : this.raw
+  }
+
+  toJSON () {
+    const result = Object.assign({}, this)
+    delete result.hosted
+    return result
+  }
+}
+
+// sets res.gitCommittish, res.gitRange, and res.gitSubdir
+function setGitAttrs (res, committish) {
+  if (!committish) {
+    res.gitCommittish = null
+    return
+  }
+
+  // for each :: separated item:
+  for (const part of committish.split('::')) {
+    // if the item has no : the n it is a commit-ish
+    if (!part.includes(':')) {
+      if (res.gitRange) {
+        throw new Error('cannot override existing semver range with a committish')
+      }
+      if (res.gitCommittish) {
+        throw new Error('cannot override existing committish with a second committish')
+      }
+      res.gitCommittish = part
+      continue
+    }
+    // split on name:value
+    const [name, value] = part.split(':')
+    // if name is semver do semver lookup of ref or tag
+    if (name === 'semver') {
+      if (res.gitCommittish) {
+        throw new Error('cannot override existing committish with a semver range')
+      }
+      if (res.gitRange) {
+        throw new Error('cannot override existing semver range with a second semver range')
+      }
+      res.gitRange = decodeURIComponent(value)
+      continue
+    }
+    if (name === 'path') {
+      if (res.gitSubdir) {
+        throw new Error('cannot override existing path with a second path')
+      }
+      res.gitSubdir = `/${value}`
+      continue
+    }
+    log.warn('npm-package-arg', `ignoring unknown key "${name}"`)
+  }
+}
+
+// Taken from: EncodePathChars and lookup_table in src/node_url.cc
+// url.pathToFileURL only returns absolute references.  We can't use it to encode paths.
+// encodeURI mangles windows paths. We can't use it to encode paths.
+// Under the hood, url.pathToFileURL does a limited set of encoding, with an extra windows step, and then calls path.resolve.
+// The encoding node does without path.resolve is not available outside of the source, so we are recreating it here.
+const encodedPathChars = new Map([
+  ['\0', '%00'],
+  ['\t', '%09'],
+  ['\n', '%0A'],
+  ['\r', '%0D'],
+  [' ', '%20'],
+  ['"', '%22'],
+  ['#', '%23'],
+  ['%', '%25'],
+  ['?', '%3F'],
+  ['[', '%5B'],
+  ['\\', isWindows ? '/' : '%5C'],
+  [']', '%5D'],
+  ['^', '%5E'],
+  ['|', '%7C'],
+  ['~', '%7E'],
+])
+
+function pathToFileURL (str) {
+  let result = ''
+  for (let i = 0; i < str.length; i++) {
+    result = `${result}${encodedPathChars.get(str[i]) ?? str[i]}`
+  }
+  if (result.startsWith('file:')) {
+    return result
+  }
+  return `file:${result}`
+}
+
+function fromFile (res, where) {
+  res.type = isFileType.test(res.rawSpec) ? 'file' : 'directory'
+  res.where = where
+
+  let rawSpec = pathToFileURL(res.rawSpec)
+
+  if (rawSpec.startsWith('file:/')) {
+    // XXX backwards compatibility lack of compliance with RFC 8089
+
+    // turn file://path into file:/path
+    if (/^file:\/\/[^/]/.test(rawSpec)) {
+      rawSpec = `file:/${rawSpec.slice(5)}`
+    }
+
+    // turn file:/../path into file:../path
+    // for 1 or 3 leading slashes (2 is already ruled out from handling file:// explicitly above)
+    if (/^\/{1,3}\.\.?(\/|$)/.test(rawSpec.slice(5))) {
+      rawSpec = rawSpec.replace(/^file:\/{1,3}/, 'file:')
+    }
+  }
+
+  let resolvedUrl
+  let specUrl
+  try {
+    // always put the '/' on "where", or else file:foo from /path/to/bar goes to /path/to/foo, when we want it to be /path/to/bar/foo
+    resolvedUrl = new URL(rawSpec, `${pathToFileURL(path.resolve(where))}/`)
+    specUrl = new URL(rawSpec)
+  } catch (originalError) {
+    const er = new Error('Invalid file: URL, must comply with RFC 8089')
+    throw Object.assign(er, {
+      raw: res.rawSpec,
+      spec: res,
+      where,
+      originalError,
+    })
+  }
+
+  // turn /C:/blah into just C:/blah on windows
+  let specPath = decodeURIComponent(specUrl.pathname)
+  let resolvedPath = decodeURIComponent(resolvedUrl.pathname)
+  if (isWindows) {
+    specPath = specPath.replace(/^\/+([a-z]:\/)/i, '$1')
+    resolvedPath = resolvedPath.replace(/^\/+([a-z]:\/)/i, '$1')
+  }
+
+  // replace ~ with homedir, but keep the ~ in the saveSpec
+  // otherwise, make it relative to where param
+  if (/^\/~(\/|$)/.test(specPath)) {
+    res.saveSpec = `file:${specPath.substr(1)}`
+    resolvedPath = path.resolve(homedir(), specPath.substr(3))
+  } else if (!path.isAbsolute(rawSpec.slice(5))) {
+    res.saveSpec = `file:${path.relative(where, resolvedPath)}`
+  } else {
+    res.saveSpec = `file:${path.resolve(resolvedPath)}`
+  }
+
+  res.fetchSpec = path.resolve(where, resolvedPath)
+  // re-normalize the slashes in saveSpec due to node:path/win32 behavior in windows
+  res.saveSpec = res.saveSpec.split('\\').join('/')
+  // Ignoring because this only happens in windows
+  /* istanbul ignore next */
+  if (res.saveSpec.startsWith('file://')) {
+    // normalization of \\win32\root paths can cause a double / which we don't want
+    res.saveSpec = `file:/${res.saveSpec.slice(7)}`
+  }
+  return res
+}
+
+function fromHostedGit (res, hosted) {
+  res.type = 'git'
+  res.hosted = hosted
+  res.saveSpec = hosted.toString({ noGitPlus: false, noCommittish: false })
+  res.fetchSpec = hosted.getDefaultRepresentation() === 'shortcut' ? null : hosted.toString()
+  setGitAttrs(res, hosted.committish)
+  return res
+}
+
+function unsupportedURLType (protocol, spec) {
+  const err = new Error(`Unsupported URL Type "${protocol}": ${spec}`)
+  err.code = 'EUNSUPPORTEDPROTOCOL'
+  return err
+}
+
+function fromURL (res) {
+  let rawSpec = res.rawSpec
+  res.saveSpec = rawSpec
+  if (rawSpec.startsWith('git+ssh:')) {
+    // git ssh specifiers are overloaded to also use scp-style git
+    // specifiers, so we have to parse those out and treat them special.
+    // They are NOT true URIs, so we can't hand them to URL.
+
+    // This regex looks for things that look like:
+    // git+ssh://git@my.custom.git.com:username/project.git#deadbeef
+    // ...and various combinations. The username in the beginning is *required*.
+    const matched = rawSpec.match(/^git\+ssh:\/\/([^:#]+:[^#]+(?:\.git)?)(?:#(.*))?$/i)
+    // Filter out all-number "usernames" which are really port numbers
+    // They can either be :1234 :1234/ or :1234/path but not :12abc
+    if (matched && !matched[1].match(isPortNumber)) {
+      res.type = 'git'
+      setGitAttrs(res, matched[2])
+      res.fetchSpec = matched[1]
+      return res
+    }
+  } else if (rawSpec.startsWith('git+file://')) {
+    // URL can't handle windows paths
+    rawSpec = rawSpec.replace(/\\/g, '/')
+  }
+  const parsedUrl = new URL(rawSpec)
+  // check the protocol, and then see if it's git or not
+  switch (parsedUrl.protocol) {
+    case 'git:':
+    case 'git+http:':
+    case 'git+https:':
+    case 'git+rsync:':
+    case 'git+ftp:':
+    case 'git+file:':
+    case 'git+ssh:':
+      res.type = 'git'
+      setGitAttrs(res, parsedUrl.hash.slice(1))
+      if (parsedUrl.protocol === 'git+file:' && /^git\+file:\/\/[a-z]:/i.test(rawSpec)) {
+        // URL can't handle drive letters on windows file paths, the host can't contain a :
+        res.fetchSpec = `git+file://${parsedUrl.host.toLowerCase()}:${parsedUrl.pathname}`
+      } else {
+        parsedUrl.hash = ''
+        res.fetchSpec = parsedUrl.toString()
+      }
+      if (res.fetchSpec.startsWith('git+')) {
+        res.fetchSpec = res.fetchSpec.slice(4)
+      }
+      break
+    case 'http:':
+    case 'https:':
+      res.type = 'remote'
+      res.fetchSpec = res.saveSpec
+      break
+
+    default:
+      throw unsupportedURLType(parsedUrl.protocol, rawSpec)
+  }
+
+  return res
+}
+
+function fromAlias (res, where) {
+  const subSpec = npa(res.rawSpec.substr(4), where)
+  if (subSpec.type === 'alias') {
+    throw new Error('nested aliases not supported')
+  }
+
+  if (!subSpec.registry) {
+    throw new Error('aliases only work for registry deps')
+  }
+
+  if (!subSpec.name) {
+    throw new Error('aliases must have a name')
+  }
+
+  res.subSpec = subSpec
+  res.registry = true
+  res.type = 'alias'
+  res.saveSpec = null
+  res.fetchSpec = null
+  return res
+}
+
+function fromRegistry (res) {
+  res.registry = true
+  const spec = res.rawSpec.trim()
+  // no save spec for registry components as we save based on the fetched
+  // version, not on the argument so this can't compute that.
+  res.saveSpec = null
+  res.fetchSpec = spec
+  const version = semver.valid(spec, true)
+  const range = semver.validRange(spec, true)
+  if (version) {
+    res.type = 'version'
+  } else if (range) {
+    res.type = 'range'
+  } else {
+    if (encodeURIComponent(spec) !== spec) {
+      throw invalidTagName(spec, res.raw)
+    }
+    res.type = 'tag'
+  }
+  return res
+}
+
+module.exports = npa
+module.exports.resolve = resolve
+module.exports.toPurl = toPurl
+module.exports.Result = Result
+
+
+/***/ }),
+
+/***/ 41782:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+"use strict";
+
+
+const npa = __nccwpck_require__(49135)
+const semver = __nccwpck_require__(62088)
+const { checkEngine } = __nccwpck_require__(66082)
+const normalizeBin = __nccwpck_require__(83841)
+
+const engineOk = (manifest, npmVersion, nodeVersion) => {
+  try {
+    checkEngine(manifest, npmVersion, nodeVersion)
+    return true
+  } catch (_) {
+    return false
+  }
+}
+
+const isBefore = (verTimes, ver, time) =>
+  !verTimes || !verTimes[ver] || Date.parse(verTimes[ver]) <= time
+
+const avoidSemverOpt = { includePrerelease: true, loose: true }
+const shouldAvoid = (ver, avoid) =>
+  avoid && semver.satisfies(ver, avoid, avoidSemverOpt)
+
+const decorateAvoid = (result, avoid) =>
+  result && shouldAvoid(result.version, avoid)
+    ? { ...result, _shouldAvoid: true }
+    : result
+
+const pickManifest = (packument, wanted, opts) => {
+  const {
+    defaultTag = 'latest',
+    before = null,
+    nodeVersion = process.version,
+    npmVersion = null,
+    includeStaged = false,
+    avoid = null,
+    avoidStrict = false,
+  } = opts
+
+  const { name, time: verTimes } = packument
+  const versions = packument.versions || {}
+
+  if (avoidStrict) {
+    const looseOpts = {
+      ...opts,
+      avoidStrict: false,
+    }
+
+    const result = pickManifest(packument, wanted, looseOpts)
+    if (!result || !result._shouldAvoid) {
+      return result
+    }
+
+    const caret = pickManifest(packument, `^${result.version}`, looseOpts)
+    if (!caret || !caret._shouldAvoid) {
+      return {
+        ...caret,
+        _outsideDependencyRange: true,
+        _isSemVerMajor: false,
+      }
+    }
+
+    const star = pickManifest(packument, '*', looseOpts)
+    if (!star || !star._shouldAvoid) {
+      return {
+        ...star,
+        _outsideDependencyRange: true,
+        _isSemVerMajor: true,
+      }
+    }
+
+    throw Object.assign(new Error(`No avoidable versions for ${name}`), {
+      code: 'ETARGET',
+      name,
+      wanted,
+      avoid,
+      before,
+      versions: Object.keys(versions),
+    })
+  }
+
+  const staged = (includeStaged && packument.stagedVersions &&
+    packument.stagedVersions.versions) || {}
+  const restricted = (packument.policyRestrictions &&
+    packument.policyRestrictions.versions) || {}
+
+  const time = before && verTimes ? +(new Date(before)) : Infinity
+  const spec = npa.resolve(name, wanted || defaultTag)
+  const type = spec.type
+  const distTags = packument['dist-tags'] || {}
+
+  if (type !== 'tag' && type !== 'version' && type !== 'range') {
+    throw new Error('Only tag, version, and range are supported')
+  }
+
+  // if the type is 'tag', and not just the implicit default, then it must be that exactly, or nothing else will do.
+  if (wanted && type === 'tag') {
+    const ver = distTags[wanted]
+    // if the version in the dist-tags is before the before date, then we use that. Otherwise, we get the highest precedence version prior to the dist-tag.
+    if (isBefore(verTimes, ver, time)) {
+      return decorateAvoid(versions[ver] || staged[ver] || restricted[ver], avoid)
+    } else {
+      return pickManifest(packument, `<=${ver}`, opts)
+    }
+  }
+
+  // similarly, if a specific version, then only that version will do
+  if (wanted && type === 'version') {
+    const ver = semver.clean(wanted, { loose: true })
+    const mani = versions[ver] || staged[ver] || restricted[ver]
+    return isBefore(verTimes, ver, time) ? decorateAvoid(mani, avoid) : null
+  }
+
+  // ok, sort based on our heuristics, and pick the best fit
+  const range = type === 'range' ? wanted : '*'
+
+  // if the range is *, then we prefer the 'latest' if available but skip this if it should be avoided, in that case we have to try a little harder.
+  const defaultVer = distTags[defaultTag]
+  if (defaultVer &&
+      (range === '*' || semver.satisfies(defaultVer, range, { loose: true })) &&
+      !restricted[defaultVer] &&
+      !shouldAvoid(defaultVer, avoid)) {
+    const mani = versions[defaultVer]
+    const ok = mani &&
+      isBefore(verTimes, defaultVer, time) &&
+      engineOk(mani, npmVersion, nodeVersion) &&
+      !mani.deprecated &&
+      !staged[defaultVer]
+    if (ok) {
+      return mani
+    }
+  }
+
+  // ok, actually have to sort the list and take the winner
+  const allEntries = Object.entries(versions)
+    .concat(Object.entries(staged))
+    .concat(Object.entries(restricted))
+    .filter(([ver]) => isBefore(verTimes, ver, time))
+
+  if (!allEntries.length) {
+    throw Object.assign(new Error(`No versions available for ${name}`), {
+      code: 'ENOVERSIONS',
+      name,
+      type,
+      wanted,
+      before,
+      versions: Object.keys(versions),
+    })
+  }
+
+  const sortSemverOpt = { loose: true }
+  const entries = allEntries.filter(([ver]) =>
+    semver.satisfies(ver, range, { loose: true }))
+    .sort((a, b) => {
+      const [vera, mania] = a
+      const [verb, manib] = b
+      const notavoida = !shouldAvoid(vera, avoid)
+      const notavoidb = !shouldAvoid(verb, avoid)
+      const notrestra = !restricted[vera]
+      const notrestrb = !restricted[verb]
+      const notstagea = !staged[vera]
+      const notstageb = !staged[verb]
+      const notdepra = !mania.deprecated
+      const notdeprb = !manib.deprecated
+      const enginea = engineOk(mania, npmVersion, nodeVersion)
+      const engineb = engineOk(manib, npmVersion, nodeVersion)
+      // sort by:
+      // - not an avoided version
+      // - not restricted
+      // - not staged
+      // - not deprecated and engine ok
+      // - engine ok
+      // - not deprecated
+      // - semver
+      return (notavoidb - notavoida) ||
+        (notrestrb - notrestra) ||
+        (notstageb - notstagea) ||
+        ((notdeprb && engineb) - (notdepra && enginea)) ||
+        (engineb - enginea) ||
+        (notdeprb - notdepra) ||
+        semver.rcompare(vera, verb, sortSemverOpt)
+    })
+
+  return decorateAvoid(entries[0] && entries[0][1], avoid)
+}
+
+module.exports = (packument, wanted, opts = {}) => {
+  const mani = pickManifest(packument, wanted, opts)
+  const picked = mani && normalizeBin(mani)
+  const policyRestrictions = packument.policyRestrictions
+  const restricted = (policyRestrictions && policyRestrictions.versions) || {}
+
+  if (picked && !restricted[picked.version]) {
+    return picked
+  }
+
+  const { before = null, defaultTag = 'latest' } = opts
+  const bstr = before ? new Date(before).toLocaleString() : ''
+  const { name } = packument
+  const pckg = `${name}@${wanted}` +
+    (before ? ` with a date before ${bstr}` : '')
+
+  const isForbidden = picked && !!restricted[picked.version]
+  const polMsg = isForbidden ? policyRestrictions.message : ''
+
+  const msg = !isForbidden ? `No matching version found for ${pckg}.`
+    : `Could not download ${pckg} due to policy violations:\n${polMsg}`
+
+  const code = isForbidden ? 'E403' : 'ETARGET'
+  throw Object.assign(new Error(msg), {
+    code,
+    type: npa.resolve(packument.name, wanted).type,
+    wanted,
+    versions: Object.keys(packument.versions ?? {}),
+    name,
+    distTags: packument['dist-tags'],
+    defaultTag,
+  })
+}
+
+
+/***/ }),
+
+/***/ 89818:
+/***/ ((module) => {
+
+const META = Symbol('proc-log.meta')
+module.exports = {
+  META: META,
+  output: {
+    LEVELS: [
+      'standard',
+      'error',
+      'buffer',
+      'flush',
+    ],
+    KEYS: {
+      standard: 'standard',
+      error: 'error',
+      buffer: 'buffer',
+      flush: 'flush',
+    },
+    standard: function (...args) {
+      return process.emit('output', 'standard', ...args)
+    },
+    error: function (...args) {
+      return process.emit('output', 'error', ...args)
+    },
+    buffer: function (...args) {
+      return process.emit('output', 'buffer', ...args)
+    },
+    flush: function (...args) {
+      return process.emit('output', 'flush', ...args)
+    },
+  },
+  log: {
+    LEVELS: [
+      'notice',
+      'error',
+      'warn',
+      'info',
+      'verbose',
+      'http',
+      'silly',
+      'timing',
+      'pause',
+      'resume',
+    ],
+    KEYS: {
+      notice: 'notice',
+      error: 'error',
+      warn: 'warn',
+      info: 'info',
+      verbose: 'verbose',
+      http: 'http',
+      silly: 'silly',
+      timing: 'timing',
+      pause: 'pause',
+      resume: 'resume',
+    },
+    error: function (...args) {
+      return process.emit('log', 'error', ...args)
+    },
+    notice: function (...args) {
+      return process.emit('log', 'notice', ...args)
+    },
+    warn: function (...args) {
+      return process.emit('log', 'warn', ...args)
+    },
+    info: function (...args) {
+      return process.emit('log', 'info', ...args)
+    },
+    verbose: function (...args) {
+      return process.emit('log', 'verbose', ...args)
+    },
+    http: function (...args) {
+      return process.emit('log', 'http', ...args)
+    },
+    silly: function (...args) {
+      return process.emit('log', 'silly', ...args)
+    },
+    timing: function (...args) {
+      return process.emit('log', 'timing', ...args)
+    },
+    pause: function () {
+      return process.emit('log', 'pause')
+    },
+    resume: function () {
+      return process.emit('log', 'resume')
+    },
+  },
+  time: {
+    LEVELS: [
+      'start',
+      'end',
+    ],
+    KEYS: {
+      start: 'start',
+      end: 'end',
+    },
+    start: function (name, fn) {
+      process.emit('time', 'start', name)
+      function end () {
+        return process.emit('time', 'end', name)
+      }
+      if (typeof fn === 'function') {
+        const res = fn()
+        if (res && res.finally) {
+          return res.finally(end)
+        }
+        end()
+        return res
+      }
+      return end
+    },
+    end: function (name) {
+      return process.emit('time', 'end', name)
+    },
+  },
+  input: {
+    LEVELS: [
+      'start',
+      'end',
+      'read',
+    ],
+    KEYS: {
+      start: 'start',
+      end: 'end',
+      read: 'read',
+    },
+    start: function (...args) {
+      // Support callback for backwards compatibility and pass additional args to event
+      let fn
+      if (typeof args[0] === 'function') {
+        fn = args.shift()
+      }
+      process.emit('input', 'start', ...args)
+      function end () {
+        return process.emit('input', 'end', ...args)
+      }
+      if (typeof fn === 'function') {
+        const res = fn()
+        if (res && res.finally) {
+          return res.finally(end)
+        }
+        end()
+        return res
+      }
+      return end
+    },
+    end: function (...args) {
+      return process.emit('input', 'end', ...args)
+    },
+    read: function (...args) {
+      let resolve, reject
+      const promise = new Promise((_resolve, _reject) => {
+        resolve = _resolve
+        reject = _reject
+      })
+      process.emit('input', 'read', resolve, reject, ...args)
+      return promise
+    },
+  },
+}
+
+
+/***/ }),
+
+/***/ 83234:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+"use strict";
+
+const builtins = __nccwpck_require__(76393)
+
+var scopedPackagePattern = new RegExp('^(?:@([^/]+?)[/])?([^/]+?)$')
+var exclusionList = [
+  'node_modules',
+  'favicon.ico',
+]
+
+function validate (name) {
+  var warnings = []
+  var errors = []
+
+  if (name === null) {
+    errors.push('name cannot be null')
+    return done(warnings, errors)
+  }
+
+  if (name === undefined) {
+    errors.push('name cannot be undefined')
+    return done(warnings, errors)
+  }
+
+  if (typeof name !== 'string') {
+    errors.push('name must be a string')
+    return done(warnings, errors)
+  }
+
+  if (!name.length) {
+    errors.push('name length must be greater than zero')
+  }
+
+  if (name.startsWith('.')) {
+    errors.push('name cannot start with a period')
+  }
+
+  if (name.startsWith('-')) {
+    errors.push('name cannot start with a hyphen')
+  }
+
+  if (name.match(/^_/)) {
+    errors.push('name cannot start with an underscore')
+  }
+
+  if (name.trim() !== name) {
+    errors.push('name cannot contain leading or trailing spaces')
+  }
+
+  // No funny business
+  exclusionList.forEach(function (excludedName) {
+    if (name.toLowerCase() === excludedName) {
+      errors.push(excludedName + ' is not a valid package name')
+    }
+  })
+
+  // Generate warnings for stuff that used to be allowed
+
+  // core module names like http, events, util, etc
+  if (builtins.includes(name.toLowerCase())) {
+    warnings.push(name + ' is a core module name')
+  }
+
+  if (name.length > 214) {
+    warnings.push('name can no longer contain more than 214 characters')
+  }
+
+  // mIxeD CaSe nAMEs
+  if (name.toLowerCase() !== name) {
+    warnings.push('name can no longer contain capital letters')
+  }
+
+  if (/[~'!()*]/.test(name.split('/').slice(-1)[0])) {
+    warnings.push('name can no longer contain special characters ("~\'!()*")')
+  }
+
+  if (encodeURIComponent(name) !== name) {
+    // Maybe it's a scoped package name, like @user/package
+    var nameMatch = name.match(scopedPackagePattern)
+    if (nameMatch) {
+      var user = nameMatch[1]
+      var pkg = nameMatch[2]
+
+      if (pkg.startsWith('.')) {
+        errors.push('name cannot start with a period')
+      }
+
+      if (encodeURIComponent(user) === user && encodeURIComponent(pkg) === pkg) {
+        return done(warnings, errors)
+      }
+    }
+
+    errors.push('name can only contain URL-friendly characters')
+  }
+
+  return done(warnings, errors)
+}
+
+var done = function (warnings, errors) {
+  var result = {
+    validForNewPackages: errors.length === 0 && warnings.length === 0,
+    validForOldPackages: errors.length === 0,
+    warnings: warnings,
+    errors: errors,
+  }
+  if (!result.warnings.length) {
+    delete result.warnings
+  }
+  if (!result.errors.length) {
+    delete result.errors
+  }
+  return result
+}
+
+module.exports = validate
 
 
 /***/ }),
@@ -317072,7 +322144,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
-var parse = __nccwpck_require__(93326)
+var parse = __nccwpck_require__(82198)
 var spdxLicenseIds = __nccwpck_require__(75204)
 
 function valid (string) {
@@ -317425,6 +322497,307 @@ function upgradeGPLs (value) {
 
 /***/ }),
 
+/***/ 82198:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+"use strict";
+
+
+var scan = __nccwpck_require__(69721)
+var parse = __nccwpck_require__(84789)
+
+module.exports = function (source) {
+  return parse(scan(source))
+}
+
+
+/***/ }),
+
+/***/ 84789:
+/***/ ((module) => {
+
+"use strict";
+
+
+// The ABNF grammar in the spec is totally ambiguous.
+//
+// This parser follows the operator precedence defined in the
+// `Order of Precedence and Parentheses` section.
+
+module.exports = function (tokens) {
+  var index = 0
+
+  function hasMore () {
+    return index < tokens.length
+  }
+
+  function token () {
+    return hasMore() ? tokens[index] : null
+  }
+
+  function next () {
+    if (!hasMore()) {
+      throw new Error()
+    }
+    index++
+  }
+
+  function parseOperator (operator) {
+    var t = token()
+    if (t && t.type === 'OPERATOR' && operator === t.string) {
+      next()
+      return t.string
+    }
+  }
+
+  function parseWith () {
+    if (parseOperator('WITH')) {
+      var t = token()
+      if (t && t.type === 'EXCEPTION') {
+        next()
+        return t.string
+      }
+      throw new Error('Expected exception after `WITH`')
+    }
+  }
+
+  function parseLicenseRef () {
+    // TODO: Actually, everything is concatenated into one string
+    // for backward-compatibility but it could be better to return
+    // a nice structure.
+    var begin = index
+    var string = ''
+    var t = token()
+    if (t.type === 'DOCUMENTREF') {
+      next()
+      string += 'DocumentRef-' + t.string + ':'
+      if (!parseOperator(':')) {
+        throw new Error('Expected `:` after `DocumentRef-...`')
+      }
+    }
+    t = token()
+    if (t.type === 'LICENSEREF') {
+      next()
+      string += 'LicenseRef-' + t.string
+      return { license: string }
+    }
+    index = begin
+  }
+
+  function parseLicense () {
+    var t = token()
+    if (t && t.type === 'LICENSE') {
+      next()
+      var node = { license: t.string }
+      if (parseOperator('+')) {
+        node.plus = true
+      }
+      var exception = parseWith()
+      if (exception) {
+        node.exception = exception
+      }
+      return node
+    }
+  }
+
+  function parseParenthesizedExpression () {
+    var left = parseOperator('(')
+    if (!left) {
+      return
+    }
+
+    var expr = parseExpression()
+
+    if (!parseOperator(')')) {
+      throw new Error('Expected `)`')
+    }
+
+    return expr
+  }
+
+  function parseAtom () {
+    return (
+      parseParenthesizedExpression() ||
+      parseLicenseRef() ||
+      parseLicense()
+    )
+  }
+
+  function makeBinaryOpParser (operator, nextParser) {
+    return function parseBinaryOp () {
+      var left = nextParser()
+      if (!left) {
+        return
+      }
+
+      if (!parseOperator(operator)) {
+        return left
+      }
+
+      var right = parseBinaryOp()
+      if (!right) {
+        throw new Error('Expected expression')
+      }
+      return {
+        left: left,
+        conjunction: operator.toLowerCase(),
+        right: right
+      }
+    }
+  }
+
+  var parseAnd = makeBinaryOpParser('AND', parseAtom)
+  var parseExpression = makeBinaryOpParser('OR', parseAnd)
+
+  var node = parseExpression()
+  if (!node || hasMore()) {
+    throw new Error('Syntax error')
+  }
+  return node
+}
+
+
+/***/ }),
+
+/***/ 69721:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+"use strict";
+
+
+var licenses = []
+  .concat(__nccwpck_require__(75204))
+  .concat(__nccwpck_require__(3389))
+var exceptions = __nccwpck_require__(53988)
+
+module.exports = function (source) {
+  var index = 0
+
+  function hasMore () {
+    return index < source.length
+  }
+
+  // `value` can be a regexp or a string.
+  // If it is recognized, the matching source string is returned and
+  // the index is incremented. Otherwise `undefined` is returned.
+  function read (value) {
+    if (value instanceof RegExp) {
+      var chars = source.slice(index)
+      var match = chars.match(value)
+      if (match) {
+        index += match[0].length
+        return match[0]
+      }
+    } else {
+      if (source.indexOf(value, index) === index) {
+        index += value.length
+        return value
+      }
+    }
+  }
+
+  function skipWhitespace () {
+    read(/[ ]*/)
+  }
+
+  function operator () {
+    var string
+    var possibilities = ['WITH', 'AND', 'OR', '(', ')', ':', '+']
+    for (var i = 0; i < possibilities.length; i++) {
+      string = read(possibilities[i])
+      if (string) {
+        break
+      }
+    }
+
+    if (string === '+' && index > 1 && source[index - 2] === ' ') {
+      throw new Error('Space before `+`')
+    }
+
+    return string && {
+      type: 'OPERATOR',
+      string: string
+    }
+  }
+
+  function idstring () {
+    return read(/[A-Za-z0-9-.]+/)
+  }
+
+  function expectIdstring () {
+    var string = idstring()
+    if (!string) {
+      throw new Error('Expected idstring at offset ' + index)
+    }
+    return string
+  }
+
+  function documentRef () {
+    if (read('DocumentRef-')) {
+      var string = expectIdstring()
+      return { type: 'DOCUMENTREF', string: string }
+    }
+  }
+
+  function licenseRef () {
+    if (read('LicenseRef-')) {
+      var string = expectIdstring()
+      return { type: 'LICENSEREF', string: string }
+    }
+  }
+
+  function identifier () {
+    var begin = index
+    var string = idstring()
+
+    if (licenses.indexOf(string) !== -1) {
+      return {
+        type: 'LICENSE',
+        string: string
+      }
+    } else if (exceptions.indexOf(string) !== -1) {
+      return {
+        type: 'EXCEPTION',
+        string: string
+      }
+    }
+
+    index = begin
+  }
+
+  // Tries to read the next token. Returns `undefined` if no token is
+  // recognized.
+  function parseToken () {
+    // Ordering matters
+    return (
+      operator() ||
+      documentRef() ||
+      licenseRef() ||
+      identifier()
+    )
+  }
+
+  var tokens = []
+  while (hasMore()) {
+    skipWhitespace()
+    if (!hasMore()) {
+      break
+    }
+
+    var token = parseToken()
+    if (!token) {
+      throw new Error('Unexpected `' + source[index] +
+                      '` at offset ' + index)
+    }
+
+    tokens.push(token)
+  }
+  return tokens
+}
+
+
+/***/ }),
+
 /***/ 93326:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
@@ -317630,7 +323003,7 @@ module.exports = function (source) {
 
   function operator () {
     var string
-    var possibilities = ['WITH', 'AND', 'OR', '(', ')', ':', '+']
+    var possibilities = [/^WITH/i, /^AND/i, /^OR/i, '(', ')', ':', '+']
     for (var i = 0; i < possibilities.length; i++) {
       string = read(possibilities[i])
       if (string) {
@@ -317644,7 +323017,7 @@ module.exports = function (source) {
 
     return string && {
       type: 'OPERATOR',
-      string: string
+      string: string.toUpperCase()
     }
   }
 
@@ -348191,7 +353564,7 @@ module.exports = __nccwpck_require__(39023).deprecate;
 /***/ 56821:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
-var parse = __nccwpck_require__(93326);
+var parse = __nccwpck_require__(33701);
 var correct = __nccwpck_require__(25728);
 
 var genericWarning = (
@@ -348277,6 +353650,307 @@ module.exports = function(argument) {
     };
   }
 };
+
+
+/***/ }),
+
+/***/ 33701:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+"use strict";
+
+
+var scan = __nccwpck_require__(67704)
+var parse = __nccwpck_require__(34586)
+
+module.exports = function (source) {
+  return parse(scan(source))
+}
+
+
+/***/ }),
+
+/***/ 34586:
+/***/ ((module) => {
+
+"use strict";
+
+
+// The ABNF grammar in the spec is totally ambiguous.
+//
+// This parser follows the operator precedence defined in the
+// `Order of Precedence and Parentheses` section.
+
+module.exports = function (tokens) {
+  var index = 0
+
+  function hasMore () {
+    return index < tokens.length
+  }
+
+  function token () {
+    return hasMore() ? tokens[index] : null
+  }
+
+  function next () {
+    if (!hasMore()) {
+      throw new Error()
+    }
+    index++
+  }
+
+  function parseOperator (operator) {
+    var t = token()
+    if (t && t.type === 'OPERATOR' && operator === t.string) {
+      next()
+      return t.string
+    }
+  }
+
+  function parseWith () {
+    if (parseOperator('WITH')) {
+      var t = token()
+      if (t && t.type === 'EXCEPTION') {
+        next()
+        return t.string
+      }
+      throw new Error('Expected exception after `WITH`')
+    }
+  }
+
+  function parseLicenseRef () {
+    // TODO: Actually, everything is concatenated into one string
+    // for backward-compatibility but it could be better to return
+    // a nice structure.
+    var begin = index
+    var string = ''
+    var t = token()
+    if (t.type === 'DOCUMENTREF') {
+      next()
+      string += 'DocumentRef-' + t.string + ':'
+      if (!parseOperator(':')) {
+        throw new Error('Expected `:` after `DocumentRef-...`')
+      }
+    }
+    t = token()
+    if (t.type === 'LICENSEREF') {
+      next()
+      string += 'LicenseRef-' + t.string
+      return { license: string }
+    }
+    index = begin
+  }
+
+  function parseLicense () {
+    var t = token()
+    if (t && t.type === 'LICENSE') {
+      next()
+      var node = { license: t.string }
+      if (parseOperator('+')) {
+        node.plus = true
+      }
+      var exception = parseWith()
+      if (exception) {
+        node.exception = exception
+      }
+      return node
+    }
+  }
+
+  function parseParenthesizedExpression () {
+    var left = parseOperator('(')
+    if (!left) {
+      return
+    }
+
+    var expr = parseExpression()
+
+    if (!parseOperator(')')) {
+      throw new Error('Expected `)`')
+    }
+
+    return expr
+  }
+
+  function parseAtom () {
+    return (
+      parseParenthesizedExpression() ||
+      parseLicenseRef() ||
+      parseLicense()
+    )
+  }
+
+  function makeBinaryOpParser (operator, nextParser) {
+    return function parseBinaryOp () {
+      var left = nextParser()
+      if (!left) {
+        return
+      }
+
+      if (!parseOperator(operator)) {
+        return left
+      }
+
+      var right = parseBinaryOp()
+      if (!right) {
+        throw new Error('Expected expression')
+      }
+      return {
+        left: left,
+        conjunction: operator.toLowerCase(),
+        right: right
+      }
+    }
+  }
+
+  var parseAnd = makeBinaryOpParser('AND', parseAtom)
+  var parseExpression = makeBinaryOpParser('OR', parseAnd)
+
+  var node = parseExpression()
+  if (!node || hasMore()) {
+    throw new Error('Syntax error')
+  }
+  return node
+}
+
+
+/***/ }),
+
+/***/ 67704:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+"use strict";
+
+
+var licenses = []
+  .concat(__nccwpck_require__(75204))
+  .concat(__nccwpck_require__(3389))
+var exceptions = __nccwpck_require__(53988)
+
+module.exports = function (source) {
+  var index = 0
+
+  function hasMore () {
+    return index < source.length
+  }
+
+  // `value` can be a regexp or a string.
+  // If it is recognized, the matching source string is returned and
+  // the index is incremented. Otherwise `undefined` is returned.
+  function read (value) {
+    if (value instanceof RegExp) {
+      var chars = source.slice(index)
+      var match = chars.match(value)
+      if (match) {
+        index += match[0].length
+        return match[0]
+      }
+    } else {
+      if (source.indexOf(value, index) === index) {
+        index += value.length
+        return value
+      }
+    }
+  }
+
+  function skipWhitespace () {
+    read(/[ ]*/)
+  }
+
+  function operator () {
+    var string
+    var possibilities = ['WITH', 'AND', 'OR', '(', ')', ':', '+']
+    for (var i = 0; i < possibilities.length; i++) {
+      string = read(possibilities[i])
+      if (string) {
+        break
+      }
+    }
+
+    if (string === '+' && index > 1 && source[index - 2] === ' ') {
+      throw new Error('Space before `+`')
+    }
+
+    return string && {
+      type: 'OPERATOR',
+      string: string
+    }
+  }
+
+  function idstring () {
+    return read(/[A-Za-z0-9-.]+/)
+  }
+
+  function expectIdstring () {
+    var string = idstring()
+    if (!string) {
+      throw new Error('Expected idstring at offset ' + index)
+    }
+    return string
+  }
+
+  function documentRef () {
+    if (read('DocumentRef-')) {
+      var string = expectIdstring()
+      return { type: 'DOCUMENTREF', string: string }
+    }
+  }
+
+  function licenseRef () {
+    if (read('LicenseRef-')) {
+      var string = expectIdstring()
+      return { type: 'LICENSEREF', string: string }
+    }
+  }
+
+  function identifier () {
+    var begin = index
+    var string = idstring()
+
+    if (licenses.indexOf(string) !== -1) {
+      return {
+        type: 'LICENSE',
+        string: string
+      }
+    } else if (exceptions.indexOf(string) !== -1) {
+      return {
+        type: 'EXCEPTION',
+        string: string
+      }
+    }
+
+    index = begin
+  }
+
+  // Tries to read the next token. Returns `undefined` if no token is
+  // recognized.
+  function parseToken () {
+    // Ordering matters
+    return (
+      operator() ||
+      documentRef() ||
+      licenseRef() ||
+      identifier()
+    )
+  }
+
+  var tokens = []
+  while (hasMore()) {
+    skipWhitespace()
+    if (!hasMore()) {
+      break
+    }
+
+    var token = parseToken()
+    if (!token) {
+      throw new Error('Unexpected `' + source[index] +
+                      '` at offset ' + index)
+    }
+
+    tokens.push(token)
+  }
+  return tokens
+}
 
 
 /***/ }),
@@ -357639,6 +363313,14 @@ __webpack_unused_export__ = setVerbosity;
 
 "use strict";
 module.exports = {"rE":"1.14.4"};
+
+/***/ }),
+
+/***/ 76393:
+/***/ ((module) => {
+
+"use strict";
+module.exports = /*#__PURE__*/JSON.parse('["_http_agent","_http_client","_http_common","_http_incoming","_http_outgoing","_http_server","_stream_duplex","_stream_passthrough","_stream_readable","_stream_transform","_stream_wrap","_stream_writable","_tls_common","_tls_wrap","assert","assert/strict","async_hooks","buffer","child_process","cluster","console","constants","crypto","dgram","diagnostics_channel","dns","dns/promises","domain","events","fs","fs/promises","http","http2","https","inspector","inspector/promises","module","net","os","path","path/posix","path/win32","perf_hooks","process","punycode","querystring","readline","readline/promises","repl","stream","stream/consumers","stream/promises","stream/web","string_decoder","sys","timers","timers/promises","tls","trace_events","tty","url","util","util/types","v8","vm","wasi","worker_threads","zlib","node:sea","node:sqlite","node:test","node:test/reporters"]');
 
 /***/ }),
 
