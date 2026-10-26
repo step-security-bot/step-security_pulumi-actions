@@ -21,6 +21,8 @@ jobs:
           node-version: 24.x
           cache: yarn
 
+      - run: corepack enable
+
       - run: yarn install
 
       - run: yarn build
