@@ -19,7 +19,6 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 24.x
-          cache: yarn
       - run: corepack enable
       - run: yarn install
       - run: yarn build
@@ -40,7 +39,6 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 24.x
-          cache: yarn
       - run: corepack enable
       - run: yarn install
       - run: yarn build
@@ -98,7 +96,6 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 24.x
-          cache: yarn
       - run: corepack enable
       - run: yarn install
       - run: yarn build
@@ -144,7 +141,6 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 24.x
-          cache: yarn
       - run: corepack enable
       - run: yarn install
       - run: yarn build
