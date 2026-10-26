@@ -1,0 +1,174 @@
+name: 'build-test'
+on: # rebuild any PRs and main branch changes
+  pull_request:
+    paths-ignore:
+      - 'CHANGELOG.md'
+      - 'README.md'
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - 'CHANGELOG.md'
+      - 'README.md'
+
+jobs:
+  build-test: # make sure build/ci work properly
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24.x
+          cache: yarn
+      - run: yarn install
+      - run: yarn build
+      - run: yarn test
+  test-output: # make sure the action works on a clean machine without building
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: oldstable
+      - run: |
+          pulumi login --local
+          pulumi stack init dev
+        working-directory: .github/test-stacks/golang
+        env:
+          PULUMI_CONFIG_PASSPHRASE: not-a-secret
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24.x
+          cache: yarn
+      - run: yarn install
+      - run: yarn build
+      - name: Run Pulumi Up
+        uses: ./
+        if: always()
+        id: pulumi
+        env:
+          PULUMI_CONFIG_PASSPHRASE: not-a-secret
+        with:
+          command: up
+          cloud-url: file://~
+          stack-name: dev
+          upsert: true
+          work-dir: .github/test-stacks/golang
+          config-map: "{name: {value: test, secret: false}}"
+          suppress-progress: true
+          log-verbosity: 6
+          debug: true
+      - run: echo 'The random string is `${{ steps.pulumi.outputs.name }}`'
+      - name: Get Outputs
+        uses: ./
+        if: always()
+        id: pulumioutput
+        env:
+          PULUMI_CONFIG_PASSPHRASE: not-a-secret
+        with:
+          command: output
+          cloud-url: file://~
+          stack-name: organization/golang/dev
+      - run: echo 'The random string is `${{ steps.pulumioutput.outputs.name }}`'
+      - name: Compare Outputs
+        id: compare
+        run: |
+          if [[ "$OUTPUT1" != "$OUTPUT2" ]]; then
+            echo "Outputs are not equal!"
+            exit 1
+          fi
+        env:
+          OUTPUT1: ${{ steps.pulumi.outputs.name }}
+          OUTPUT2: ${{ steps.pulumioutput.outputs.name }}
+  test-update-plan: # make sure the action works on a clean machine without building
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: oldstable
+      - run: |
+          pulumi login --local
+          pulumi stack init dev
+        working-directory: .github/test-stacks/golang
+        env:
+          PULUMI_CONFIG_PASSPHRASE: not-a-secret
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24.x
+          cache: yarn
+      - run: yarn install
+      - run: yarn build
+      - name: Generate Update Plan via Pulumi Preview
+        uses: ./
+        if: always()
+        id: pulumi-preview
+        env:
+          PULUMI_CONFIG_PASSPHRASE: not-a-secret
+        with:
+          command: preview
+          cloud-url: file://~
+          stack-name: dev
+          upsert: true
+          work-dir: .github/test-stacks/golang
+          config-map: "{name: {value: test, secret: false}}"
+          plan: /tmp/update-plan.json
+          suppress-progress: true
+          log-verbosity: 6
+          debug: true
+      - name: Apply Update Plan via Pulumi Up
+        uses: ./
+        if: always()
+        id: pulumi-up
+        env:
+          PULUMI_CONFIG_PASSPHRASE: not-a-secret
+        with:
+          command: up
+          cloud-url: file://~
+          stack-name: dev
+          upsert: true
+          work-dir: .github/test-stacks/golang
+          config-map: "{name: {value: test, secret: false}}"
+          plan: /tmp/update-plan.json
+          suppress-progress: true
+          log-verbosity: 6
+          debug: true
+      - run: echo 'The random string is `${{ steps.pulumi-up.outputs.name }}`'
+  test-pr-version: # test installing Pulumi from a PR build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24.x
+          cache: yarn
+      - run: yarn install
+      - run: yarn build
+      # We use the last merged PR to guarantee we are not trying to access an artifact that has been deleted.
+      # GitHub automatically deletes workflow artifacts after a retention period, so using a recent merged PR
+      # ensures the PR build artifacts are still available for testing.
+      # Fork (community) PRs are excluded: their CI runs don't upload CLI artifacts.
+      - name: Get last merged PR number
+        id: get-pr
+        run: |
+          PR_NUMBER=$(gh pr list --repo pulumi/pulumi --state merged --limit 20 --json number,isCrossRepository --jq '[.[] | select(.isCrossRepository | not)][0].number')
+          echo "pr-number=$PR_NUMBER" >> $GITHUB_OUTPUT
+          echo "Using PR #$PR_NUMBER"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install Pulumi from PR
+        uses: ./
+        with:
+          pulumi-version: pr#${{ steps.get-pr.outputs.pr-number }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Verify Pulumi version
+        run: |
+          INSTALLED_VERSION=$(pulumi version)
+          echo "Installed version: $INSTALLED_VERSION"
+          # Verify the version starts with 'v' and contains 'alpha' (PR builds are alpha versions)
+          if [[ ! "$INSTALLED_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-alpha ]]; then
+            echo "Error: Expected PR build version format (v*.*.*-alpha*), got $INSTALLED_VERSION"
+            exit 1
+          fi
+          echo "Successfully installed PR build: $INSTALLED_VERSION"

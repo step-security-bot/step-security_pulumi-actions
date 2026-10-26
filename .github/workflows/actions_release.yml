@@ -1,0 +1,32 @@
+name: Release GitHub Actions
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag for the release"
+        required: true
+      script:
+        description: "Command used to build and bundle the action"
+        required: false
+        default: "yarn build"
+      yarn_version:
+        description: "Yarn version to use"
+        required: false
+        default: "4.15.0"
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    permissions:
+      actions: read
+      id-token: write
+      contents: write
+
+    uses: step-security/reusable-workflows/.github/workflows/actions_release.yaml@v1
+    with:
+      tag: "${{ github.event.inputs.tag }}"
+      script: ${{ inputs.script || 'yarn build' }}
+      yarn_version: ${{ inputs.yarn_version || '4.15.0' }}
