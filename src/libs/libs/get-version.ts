@@ -140,7 +140,8 @@ export async function getVersionObject(range: string): Promise<Version> {
       'windows-x64': `https://get.pulumi.com/releases/sdk/pulumi-${version}-windows-x64.zip`,
       'windows-arm64': `https://get.pulumi.com/releases/sdk/pulumi-${version}-windows-arm64.zip`,
     };
-    const checksums = 'https://get.pulumi.com/releases/sdk/pulumi-${version}-checksums.txt';
+    // The checksum files are published without the `v` prefix the archives use
+    const checksums = `https://get.pulumi.com/releases/sdk/pulumi-${version.replace(/^v/, '')}-checksums.txt`;
     const latest = false;
     return { version, date, downloads, checksums, latest };
   }

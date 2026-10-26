@@ -385780,6 +385780,49 @@ function alignValue(value, precedingText) {
 
 
 
+const HTML_ESCAPES = {
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+};
+// Longest entity emitted by escapeHtml is `&amp;`; allow a little slack.
+const MAX_ENTITY_LENGTH = 6;
+function escapeHtml(text) {
+    /**
+     *  Escape the characters that would otherwise let Pulumi output close the
+     *  surrounding <pre> block and render as markup in the PR comment
+     *  text: string to escape
+     *
+     *  return the escaped string
+     */
+    return text.replace(/[&<>]/g, (char) => HTML_ESCAPES[char]);
+}
+function alignToEntityBoundary(text, index, trimFromFront) {
+    /**
+     *  Move a cut point so it never lands inside an HTML entity, which would
+     *  leave a fragment such as `&l` in the rendered comment
+     *  text: escaped string that is about to be cut
+     *  index: proposed cut point, the first character kept when trimming from
+     *         the front and the first character dropped otherwise
+     *  trimFromFront: whether the cut keeps the tail rather than the head
+     *
+     *  return the adjusted cut point
+     */
+    const start = text.lastIndexOf('&', index);
+    if (start === -1 || start >= index || index - start >= MAX_ENTITY_LENGTH) {
+        return index;
+    }
+    const end = text.indexOf(';', start);
+    if (trimFromFront) {
+        // An entity opened before the cut and closes at or after it, so drop the
+        // whole entity rather than keeping its tail.
+        return end !== -1 && end >= index && end - start < MAX_ENTITY_LENGTH
+            ? end + 1
+            : index;
+    }
+    // An entity is still open at the cut, so drop it rather than keeping its head.
+    return end === -1 || end >= index ? start : index;
+}
 function trimOutputByCharacters(message, maxLength, alwaysIncludeSummary) {
     /**
      *  Trim message to maxLength
@@ -385795,28 +385838,51 @@ function trimOutputByCharacters(message, maxLength, alwaysIncludeSummary) {
         // Trim input message by number of exceeded characters from front or back as configured
         const dif = message.length - maxLength;
         if (alwaysIncludeSummary) {
-            message = message.substring(dif, message.length);
+            message = message.substring(alignToEntityBoundary(message, dif, true));
         }
         else {
-            message = message.substring(0, message.length - dif);
+            const end = alignToEntityBoundary(message, message.length - dif, false);
+            message = message.substring(0, end);
         }
         trimmed = true;
     }
     return [message, trimmed];
+}
+function isSafeLinkTarget(candidate) {
+    /**
+     *  Checks that a string is safe to use as a Markdown link target. The link
+     *  is built from Pulumi output, so it must not be able to close the link
+     *  early or carry a scheme other than http(s)
+     *  candidate: link target taken from the output
+     *
+     *  return true if the target is a well-formed http(s) URL
+     */
+    if (!candidate || /[\s<>()[\]'"`\\]/.test(candidate)) {
+        return false;
+    }
+    try {
+        const { protocol } = new URL(candidate);
+        return protocol === 'https:' || protocol === 'http:';
+    }
+    catch {
+        return false;
+    }
 }
 function extractViewLiveLink(output) {
     /**
      *  Extracts the Pulumi preview link from the output
      *  output: pulumi preview output
      *
-     *  return link to the Pulumi preview
+     *  return link to the Pulumi preview, or an empty string if the output does
+     *  not contain one that is safe to render
      */
     const lines = output.split('\n');
     const linkLine = lines.find((line) => line.includes('View Live:'));
     if (!linkLine) {
         return '';
     }
-    return linkLine.split('View Live: ')[1];
+    const candidate = (linkLine.split('View Live: ')[1] ?? '').trim();
+    return isSafeLinkTarget(candidate) ? candidate : '';
 }
 async function handlePullRequestMessage(config, projectName, output) {
     const { githubToken, command, stackName, editCommentOnPr, alwaysIncludeSummary, } = config;
@@ -385826,8 +385892,9 @@ async function handlePullRequestMessage(config, projectName, output) {
     const MAX_CHARACTER_COMMENT = 64_000;
     const heading = `#### :tropical_drink: \`${command}\` on ${projectName}/${stackName}`;
     const summary = '<summary>Pulumi report</summary>';
-    const [message, trimmed] = trimOutputByCharacters(output, MAX_CHARACTER_COMMENT, alwaysIncludeSummary);
     const viewLiveLink = extractViewLiveLink(output);
+    // Escape before trimming so the escaped body still fits the character budget
+    const [message, trimmed] = trimOutputByCharacters(escapeHtml(output), MAX_CHARACTER_COMMENT, alwaysIncludeSummary);
     const body = dist_dedent `
     ${heading}
 
@@ -386674,6 +386741,107 @@ function _unique(values) {
     return Array.from(new Set(values));
 }
 //# sourceMappingURL=tool-cache.js.map
+;// CONCATENATED MODULE: ./src/libs/checksum.ts
+
+
+
+
+function parseChecksums(contents) {
+    /**
+     *  Parses a `sha256sum` style checksum file
+     *  contents: body of the published checksums file
+     *
+     *  return map of file name to lower case digest
+     */
+    const checksums = new Map();
+    for (const line of contents.split('\n')) {
+        // `<digest>  <name>`, where the name may carry a `*` binary mode marker
+        const match = line.trim().match(/^([a-fA-F0-9]{64})\s+\*?(\S+)$/);
+        if (match) {
+            checksums.set(external_path_.posix.basename(match[2]), match[1].toLowerCase());
+        }
+    }
+    return checksums;
+}
+function sha256(filePath) {
+    return new Promise((resolve, reject) => {
+        const hash = external_crypto_.createHash('sha256');
+        const stream = external_fs_.createReadStream(filePath);
+        stream.on('error', reject);
+        stream.on('data', (chunk) => hash.update(chunk));
+        stream.on('end', () => resolve(hash.digest('hex')));
+    });
+}
+function findChecksum(checksums, fileName, platform) {
+    /**
+     *  Looks up the digest for a download
+     *  checksums: parsed checksums file
+     *  fileName: name of the downloaded file
+     *  platform: the platform the download was picked for
+     *
+     *  return the digest, or undefined if the file is not listed
+     */
+    const exact = checksums.get(fileName);
+    if (exact) {
+        return exact;
+    }
+    // Dev builds are served as `pulumi-v3.1.0-alpha.xdeadbee-linux-x64.tar.gz`
+    // but listed under the release version they were cut from, so fall back to
+    // the platform. A checksums file covers one version with one entry per
+    // platform, so insist on a single match rather than guessing.
+    if (!platform) {
+        return undefined;
+    }
+    const matches = [...checksums].filter(([name]) => name.includes(`-${platform}.`));
+    return matches.length === 1 ? matches[0][1] : undefined;
+}
+async function verifyChecksum(filePath, downloadUrl, checksumsUrl, platform) {
+    /**
+     *  Verifies a downloaded file against the checksums Pulumi publishes
+     *  alongside the release. A mismatch is fatal, but a checksum that cannot be
+     *  located is only a warning: releases that predate the published checksum
+     *  files must keep installing as they did before
+     *  filePath: the downloaded file on disk
+     *  downloadUrl: where the file came from, used to pick the right entry
+     *  checksumsUrl: the published checksums file, empty when there is none
+     *  platform: the platform the download was picked for
+     */
+    if (!checksumsUrl) {
+        warning(`No checksums are published for ${downloadUrl}, skipping verification`);
+        return;
+    }
+    let checksums;
+    try {
+        const response = await fetch(checksumsUrl);
+        if (!response.ok) {
+            throw new Error(`${response.status} ${response.statusText}`);
+        }
+        checksums = parseChecksums(await response.text());
+    }
+    catch (error) {
+        warning(`Unable to fetch checksums from ${checksumsUrl}, skipping verification: ${error}`);
+        return;
+    }
+    let fileName;
+    try {
+        fileName = external_path_.posix.basename(new URL(downloadUrl).pathname);
+    }
+    catch {
+        warning(`Could not derive a file name from ${downloadUrl}, skipping verification`);
+        return;
+    }
+    const expected = findChecksum(checksums, fileName, platform);
+    if (!expected) {
+        warning(`No checksum listed for ${fileName} in ${checksumsUrl}, skipping verification`);
+        return;
+    }
+    const actual = await sha256(filePath);
+    if (actual !== expected) {
+        throw new Error(`Checksum mismatch for ${fileName}: expected ${expected} but the download from ${downloadUrl} hashed to ${actual}. Refusing to install.`);
+    }
+    info(`Verified the sha256 checksum of ${fileName}`);
+}
+
 ;// CONCATENATED MODULE: ./src/libs/exec.ts
 
 const libs_exec_exec = async (command, args = [], silent) => {
@@ -386804,7 +386972,8 @@ async function getVersionObject(range) {
             'windows-x64': `https://get.pulumi.com/releases/sdk/pulumi-${version}-windows-x64.zip`,
             'windows-arm64': `https://get.pulumi.com/releases/sdk/pulumi-${version}-windows-arm64.zip`,
         };
-        const checksums = 'https://get.pulumi.com/releases/sdk/pulumi-${version}-checksums.txt';
+        // The checksum files are published without the `v` prefix the archives use
+        const checksums = `https://get.pulumi.com/releases/sdk/pulumi-${version.replace(/^v/, '')}-checksums.txt`;
         const latest = false;
         return { version, date, downloads, checksums, latest };
     }
@@ -386844,6 +387013,7 @@ function resolveVersion(versions, range) {
 }
 
 ;// CONCATENATED MODULE: ./src/libs/pulumi-cli.ts
+
 
 
 
@@ -386930,7 +387100,7 @@ async function downloadCli(range) {
             info('Pulumi is not detected in the PATH. Proceeding to download');
         }
     }
-    const { version, downloads } = await getVersionObject(range);
+    const { version, downloads, checksums } = await getVersionObject(range);
     if (isPulumiInstalled && range === 'latest') {
         const runnerVersion = await getVersion();
         if (runnerVersion && runnerVersion === version) {
@@ -386959,8 +387129,12 @@ async function downloadCli(range) {
     // For PR builds, we need to authenticate the download
     const isPrBuild = range.toLowerCase().startsWith('pr#');
     const auth = isPrBuild && process.env.GITHUB_TOKEN ? `Bearer ${process.env.GITHUB_TOKEN}` : undefined;
+    if (isPrBuild) {
+        warning(`Installing an unreleased CLI built from ${range}. PR builds are not published with checksums and may come from an unreviewed pull request, so only use them for testing.`);
+    }
     const downloaded = await downloadTool(downloads[platform], undefined, auth);
     core_debug(`successfully downloaded ${downloads[platform]} to ${downloaded}`);
+    await verifyChecksum(downloaded, downloads[platform], checksums, platform);
     await mkdirP(destination);
     core_debug(`Successfully created ${destination}`);
     // PR builds are zip files containing tarballs, extract to get the tarball

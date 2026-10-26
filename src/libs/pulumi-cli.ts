@@ -5,6 +5,7 @@ import * as core from '@actions/core';
 import * as io from '@actions/io';
 import * as tc from '@actions/tool-cache';
 import * as semver from 'semver';
+import { verifyChecksum } from './checksum';
 import * as exec from './exec';
 import { getVersionObject } from './libs/get-version';
 
@@ -103,7 +104,7 @@ export async function downloadCli(range: string): Promise<void> {
     }
   }
 
-  const { version, downloads } = await getVersionObject(range);
+  const { version, downloads, checksums } = await getVersionObject(range);
   if (isPulumiInstalled && range === 'latest') {
     const runnerVersion = await getVersion();
     if (runnerVersion && runnerVersion === version) {
@@ -146,8 +147,16 @@ export async function downloadCli(range: string): Promise<void> {
   const isPrBuild = range.toLowerCase().startsWith('pr#');
   const auth = isPrBuild && process.env.GITHUB_TOKEN ? `Bearer ${process.env.GITHUB_TOKEN}` : undefined;
 
+  if (isPrBuild) {
+    core.warning(
+      `Installing an unreleased CLI built from ${range}. PR builds are not published with checksums and may come from an unreviewed pull request, so only use them for testing.`,
+    );
+  }
+
   const downloaded = await tc.downloadTool(downloads[platform], undefined, auth);
   core.debug(`successfully downloaded ${downloads[platform]} to ${downloaded}`);
+
+  await verifyChecksum(downloaded, downloads[platform], checksums, platform);
 
   await io.mkdirP(destination);
   core.debug(`Successfully created ${destination}`);
