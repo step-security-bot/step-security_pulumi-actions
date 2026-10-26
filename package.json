@@ -1,8 +1,8 @@
 {
   "name": "pulumi-github-action",
-  "version": "2.0.0",
+  "version": "7.0.0",
   "main": "dist/index.js",
-  "repository": "git@github.com:pulumi/actions",
+  "repository": "git@github.com:step-security/pulumi-actions",
   "license": "Apache-2.0",
   "scripts": {
     "clean": "rimraf coverage build tmp dist",

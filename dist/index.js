@@ -385645,7 +385645,7 @@ function makeConfig() {
             targetDependents: inputs_getBooleanInput('target-dependents'),
             policyPacks: parseSemicolorToArray(inputs_getMultilineInput('policyPacks')),
             policyPackConfigs: parseSemicolorToArray(inputs_getMultilineInput('policyPackConfigs')),
-            userAgent: 'pulumi/actions@v6',
+            userAgent: 'step-security/pulumi-actions@v7',
             color: getUnionInput('color', {
                 alternatives: ['always', 'never', 'raw', 'auto'],
             }),
